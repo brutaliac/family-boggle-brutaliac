@@ -103,6 +103,10 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 .herepop[hidden]{display:none}
 .herepop strong{font-size:.9rem}.herepop .row{font-size:.95rem}.herepop .row.dim{color:var(--muted);font-size:.85rem}
 #app{position:relative}
+#homelink{color:inherit;text-decoration:none;border-radius:6px}
+#homelink:hover,#homelink:focus-visible{text-decoration:underline;text-underline-offset:3px}
+.live{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg);border:2px solid var(--accent);border-radius:12px;padding:10px 12px}
+.live[hidden]{display:none}.live span{font-weight:700}.live button{min-height:40px;padding:6px 14px}
 .chat.set{height:auto;max-height:none}
 @media (max-width:420px){header.top h1{font-size:1.02rem;white-space:nowrap;flex:0 1 auto;min-width:0}header.top .top-r{gap:6px;flex:0 0 auto}header.top .top-r .snd{width:36px;min-height:36px;flex:0 0 36px}header.top .top-r .pill{padding:3px 9px;font-size:.82rem;white-space:nowrap;flex:0 0 auto}}
 @media (max-width:340px){header.top h1{font-size:.92rem}header.top .top-r{gap:4px}header.top .top-r .snd{width:32px;min-height:32px;flex:0 0 32px}}
@@ -178,7 +182,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 
 <main id="app">
   <header class="top">
-    <h1>Family Boggle</h1>
+    <h1><a href="#lobby" id="homelink" title="Lobby: invite link and next round">Family Boggle</a></h1>
     <div class="top-r">
       <button type="button" id="chatbtn" class="snd chatbtn" title="Open chat" aria-label="Open chat">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.5-4.6A8 8 0 1 1 21 12z"/></svg>
@@ -201,6 +205,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 
   <!-- Lobby -->
   <section id="v-lobby" class="panel" hidden>
+    <div class="live" id="lobby-live" hidden><span id="live-text"></span><button type="button" id="live-back" class="primary">Back to the game</button></div>
     <h2 id="lobby-title">Ready when you are</h2>
     <label class="field">Your name
       <input type="text" id="name" maxlength="24" autocomplete="off" placeholder="Type your name here">
@@ -549,7 +554,7 @@ function nextBox(container){
   container.textContent='';
   const dur=h('select',{id:'opt-dur'});for(const [v,t] of [[90,'90 seconds'],[120,'2 minutes'],[180,'3 minutes (classic)'],[240,'4 minutes']]){const o=h('option',{value:String(v),text:t});if(v===S.opt.duration)o.selected=true;dur.append(o);}
   dur.addEventListener('change',()=>{S.opt.duration=Number(dur.value);});
-  const go=h('button',{class:'primary',type:'button',text:S.game?'Start next round':'Start round'});go.disabled=!S.connected;go.addEventListener('click',startRound);
+  const live=S.phase==='count'||S.phase==='play';const go=h('button',{class:'primary',type:'button',text:live?'Round in progress':(S.game?'Start next round':'Start round')});go.disabled=!S.connected||live;go.addEventListener('click',startRound);
   container.append(h('label',{class:'field'},'Round length',dur),go);
   if(S.notice)container.append(h('p',{class:'msg bad',text:S.notice}));
 }
@@ -560,7 +565,7 @@ function renderLobby(){
   if(!S.connected)here.append(h('span',{class:'muted small',text:'Connecting to the game… this can take up to a minute the first time.'}));
   else if(!here.firstChild)here.append(h('span',{class:'muted small',text:'Type your name to show up here.'}));
   const hb=$('#host-box');
-  if(!hb.firstChild||S.notice||hb.dataset.c!==String(S.connected)){hb.dataset.c=String(S.connected);nextBox(hb);}
+  if(!hb.firstChild||S.notice||hb.dataset.c!==String(S.connected)||hb.dataset.p!==S.phase){hb.dataset.c=String(S.connected);hb.dataset.p=S.phase;nextBox(hb);}
 }
 function renderPlay(){
   $('#wc').textContent=S.myWords.length;
@@ -631,10 +636,28 @@ function renderResults(){
   const mc=$('#missed');mc.textContent='';miss.slice(0,30).forEach(w=>mc.append(h('span',{class:'chip',text:w})));buildMini();if(miniFor!==lastMiniGame){lastMiniGame=miniFor;miniWord=null;}showMini(miniWord);
   const nb=$('#next-box');if(!nb.firstChild||S.notice||nb.dataset.g!==g.id||nb.dataset.c!==String(S.connected)){nb.dataset.g=g.id;nb.dataset.c=String(S.connected);nextBox(nb);}
 }
+
+/* ---------- lobby link (the title) ---------- */
+function renderLive(){
+  const box=$('#lobby-live');const on=!!S.viewLobby&&S.phase!=='lobby';box.hidden=!on;if(!on)return;
+  const g=S.game;let t='';
+  if(S.phase==='count')t='Round starting…';
+  else if(S.phase==='play'&&g)t='Round in progress: '+fmt(g.startAt+g.duration*1000-hostNow())+' left';
+  else t='Round over. The scores are ready.';
+  $('#live-text').textContent=t;
+  $('#live-back').textContent=S.phase==='done'||S.phase==='results'?'See the scores':'Back to the game';
+}
+$('#homelink').addEventListener('click',e=>{
+  e.preventDefault();
+  if(S.phase==='lobby')return;
+  S.viewLobby=!S.viewLobby;render();try{window.scrollTo(0,0);}catch(_){}
+});
+$('#live-back').addEventListener('click',()=>{S.viewLobby=false;render();try{window.scrollTo(0,0);}catch(_){}});
 function render(){
   renderStatus();
   const ph=S.phase;
-  if(ph==='lobby'){show('lobby');renderLobby();}
+  if(S.viewLobby&&ph!=='lobby'){show('lobby');renderLobby();renderLive();}
+  else if(ph==='lobby'){S.viewLobby=false;show('lobby');renderLobby();renderLive();}
   else if(ph==='count'){show('count');$('#count-who').textContent=(S.game.hostName?S.game.hostName+' started a round. ':'')+'Don’t peek, the board appears when the clock starts.';}
   else if(ph==='play'){show('play');if(S.builtFor!==S.game.id){buildBoard();try{window.scrollTo(0,0);}catch(e){}}renderPlay();fitBoard();}
   else{show('results');renderResults();}
@@ -644,9 +667,11 @@ function update(force){
   const ph=computePhase();S.phase=ph;if(ph!=='play')lastTick=99;const gid=S.game&&S.game.id;
   if(force||ph!==lastPhase||gid!==lastGid){
     if(ph==='play'&&lastPhase==='count')sfx.horn();if(ph==='play'&&lastPhase!=='play'){try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}}
+    if(ph==='count'&&gid!==lastGid)S.viewLobby=false;
     lastPhase=ph;lastGid=gid;render();
   }
   maybeAskName();
+  if(S.viewLobby)renderLive();
   {const nm=$('#name');const v=nm.value.slice(0,24);if(v&&v!==S.name&&S.phase==='lobby'){S.name=v;ls('bw-name',v);send({t:'name',name:v});}}
   if(ph==='count'){const cs=Math.max(1,Math.ceil((S.game.startAt-hostNow())/1000));$('#count-n').textContent=String(cs);if(cs!==lastCount){lastCount=cs;sfx.beep();}}else lastCount=99;
   if(ph==='play'){

@@ -98,6 +98,17 @@ summary{cursor:pointer;font-weight:700}
 .chatbtn .badge[hidden]{display:none}
 .chat{position:fixed;left:0;right:0;bottom:0;z-index:50;margin-inline:auto;width:min(100%,520px);max-height:min(62dvh,520px);height:min(62dvh,520px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.22);padding-bottom:env(safe-area-inset-bottom)}
 .chat[hidden]{display:none}
+button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--line);color:var(--muted)}
+.herepop{position:absolute;right:16px;top:58px;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);padding:12px 14px;min-width:200px;max-width:min(300px,calc(100vw - 32px));display:flex;flex-direction:column;gap:6px}
+.herepop[hidden]{display:none}
+.herepop strong{font-size:.9rem}.herepop .row{font-size:.95rem}.herepop .row.dim{color:var(--muted);font-size:.85rem}
+#app{position:relative}
+.chat.set{height:auto;max-height:none}
+@media (max-width:420px){header.top h1{font-size:1.02rem;white-space:nowrap;flex:0 1 auto;min-width:0}header.top .top-r{gap:6px;flex:0 0 auto}header.top .top-r .snd{width:36px;min-height:36px;flex:0 0 36px}header.top .top-r .pill{padding:3px 9px;font-size:.82rem;white-space:nowrap;flex:0 0 auto}}
+@media (max-width:340px){header.top h1{font-size:.92rem}header.top .top-r{gap:4px}header.top .top-r .snd{width:32px;min-height:32px;flex:0 0 32px}}
+.set-body{display:flex;flex-direction:column;gap:10px;padding:14px 16px 18px}
+.set-body p{margin:0}
+
 .chat-head{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 8px 16px;border-bottom:1px solid var(--line)}
 .chat-head strong{font-size:1.05rem}
 .chat-head button{min-height:40px;padding:4px 14px;border-width:2px;border-color:var(--line)}
@@ -173,6 +184,9 @@ summary{cursor:pointer;font-weight:700}
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.5-4.6A8 8 0 1 1 21 12z"/></svg>
         <span class="badge" id="chatbadge" hidden>0</span>
       </button>
+      <button type="button" id="setbtn" class="snd" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
       <button type="button" id="sound" class="snd" aria-pressed="true" title="Sound on. Tap to mute.">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>
@@ -180,9 +194,10 @@ summary{cursor:pointer;font-weight:700}
           <g class="x"><path d="M16 9l5 6M21 9l-5 6"/></g>
         </svg>
       </button>
-      <span class="pill" id="status">Connecting…</span>
+      <button type="button" class="pill" id="status" aria-haspopup="true" title="Tap to see who is here">Connecting…</button>
     </div>
   </header>
+  <div class="herepop" id="herepop" role="status" hidden></div>
 
   <!-- Lobby -->
   <section id="v-lobby" class="panel" hidden>
@@ -265,6 +280,15 @@ summary{cursor:pointer;font-weight:700}
   </section>
 </main>
 
+<div class="chat set" id="settings" role="dialog" aria-label="Settings" hidden>
+  <div class="chat-head"><strong>Settings</strong><button type="button" id="setclose">Close</button></div>
+  <form class="set-body" id="setform" autocomplete="off">
+    <p class="muted" id="set-note">Everyone in the game sees this name.</p>
+    <label for="setname"><strong>Your name</strong></label>
+    <input type="text" id="setname" maxlength="24" placeholder="Enter your name" enterkeyhint="done" autocomplete="off">
+    <button type="submit" class="primary">Save name</button>
+  </form>
+</div>
 <div class="chat" id="chat" role="dialog" aria-label="Family chat" hidden>
   <div class="chat-head"><strong>Family chat</strong><button type="button" id="chatclose">Close</button></div>
   <div class="chat-list" id="chatlist" aria-live="polite"></div>
@@ -357,6 +381,7 @@ function chatRender(msg,fresh){
 }
 function chatBadge(){const b=$('#chatbadge');b.hidden=chat.unread===0;b.textContent=chat.unread>9?'9+':String(chat.unread);$('#chatbtn').setAttribute('aria-label',chat.unread?('Open chat, '+chat.unread+' new'):'Open chat');}
 function chatSet(open){
+  if(open&&!$('#settings').hidden)$('#settings').hidden=true;
   chat.open=open;$('#chat').hidden=!open;
   if(open){chat.unread=0;chatBadge();const l=$('#chatlist');l.scrollTop=l.scrollHeight;setTimeout(()=>{try{$('#chatinp').focus();}catch(e){}},50);}
 }
@@ -370,17 +395,60 @@ $('#chatform').addEventListener('submit',e=>{
   if(!S.name){inp.value='';chatRender({id:'local'+Date.now(),pid:S.meId,name:'',text:'Enter your name on the main screen first, then you can chat.'},false);return;}
   send({t:'chat',text});inp.value='';
 });
+
+/* ---------- settings (change your name) ---------- */
+let setAuto=false;
+function setOpen(open,note){
+  const el=$('#settings');el.hidden=!open;
+  if(open){if(chat.open)chatSet(false);$('#setname').value=S.name||'';$('#set-note').textContent=note||'Everyone in the game sees this name.';setTimeout(()=>{try{$('#setname').focus();$('#setname').select();}catch(e){}},50);}
+}
+$('#setbtn').addEventListener('click',()=>setOpen($('#settings').hidden));
+$('#setclose').addEventListener('click',()=>setOpen(false));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#settings').hidden)setOpen(false);});
+$('#setform').addEventListener('submit',e=>{
+  e.preventDefault();const v=$('#setname').value.replace(/[<>]/g,'').trim().slice(0,24);
+  if(!v){$('#set-note').textContent='Please type a name first.';return;}
+  S.name=v;ls('bw-name',v);$('#name').value=v;send({t:'name',name:v});
+  if(S.notice){S.notice='';}
+  setOpen(false);render();
+});
+// someone who opens the link in the middle of a round has no name box on screen: ask for it right away
+function maybeAskName(){if(setAuto||S.name||!S.connected||S.phase==='lobby')return;setAuto=true;setOpen(true,'Enter your name to join the game.');}
+
+/* ---------- who is here + connection check ---------- */
+function herePop(){
+  const el=$('#herepop');
+  if(!el.hidden){el.hidden=true;return;}
+  const named=S.list.filter(p=>p.online);
+  const total=Math.max(S.here||0,named.length);
+  el.textContent='';
+  el.append(h('strong',{text:total>1?total+' people connected':(total===1?'Only you are connected':'Not connected yet')}));
+  named.forEach(p=>el.append(h('span',{class:'row',text:p.name+(p.id===S.meId?' (you)':'')})));
+  const unnamed=total-named.length;
+  if(unnamed>0)el.append(h('span',{class:'row dim',text:unnamed+(unnamed===1?' person has':' people have')+' not entered a name yet'}));
+  el.append(h('span',{class:'row dim',text:'Game room: '+ROOM+(ROOM!=='family'?'  (everyone must use the same link)':'')}));
+  el.hidden=false;
+}
+$('#status').addEventListener('click',e=>{e.stopPropagation();herePop();});
+document.addEventListener('click',e=>{const el=$('#herepop');if(!el.hidden&&!el.contains(e.target))el.hidden=true;});
+S.lastMsg=Date.now();
+function reconnectNow(){const old=S.ws;if(old){old.onclose=null;old.onmessage=null;old.onerror=null;try{old.close();}catch(e){}}S.ws=null;S.connected=false;renderStatus();connect();}
+setInterval(()=>{
+  if(!S.ws||S.ws.readyState!==1)return;
+  send({t:'ping'});
+  if(Date.now()-S.lastMsg>45000)reconnectNow();
+},15000);
 function connect(){
   const proto=location.protocol==='https:'?'wss:':'ws:';
   let ws;try{ws=new WebSocket(proto+'//'+location.host+'/ws?room='+encodeURIComponent(ROOM));}catch(e){setTimeout(connect,2000);return;}
   S.ws=ws;
   ws.onopen=()=>{S.connected=true;backoff=800;send({t:'hello',key:S.myKey,name:S.name});if(S.myWords.length)sendWords();renderStatus();};
-  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(m.t==='state')onState(m);else if(m.t==='chat'&&m.msg)chatRender(m.msg,true);else if(m.t==='chatlog'&&Array.isArray(m.msgs)){m.msgs.forEach(x=>chatRender(x,false));chatEmpty();}};
+  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}S.lastMsg=Date.now();if(m.t==='state')onState(m);else if(m.t==='chat'&&m.msg)chatRender(m.msg,true);else if(m.t==='chatlog'&&Array.isArray(m.msgs)){m.msgs.forEach(x=>chatRender(x,false));chatEmpty();}};
   ws.onclose=()=>{if(S.ws!==ws)return;S.connected=false;renderStatus();setTimeout(connect,backoff);backoff=Math.min(backoff*1.7,8000);};
   ws.onerror=()=>{try{ws.close();}catch(e){}};
 }
 function onState(m){
-  S.clockOff=m.now-Date.now();S.meId=m.meId;S.list=Array.isArray(m.players)?m.players:[];
+  S.clockOff=m.now-Date.now();S.meId=m.meId;S.here=Number(m.here)||0;S.list=Array.isArray(m.players)?m.players:[];
   const g=m.game||null;
   if(g&&g.id!==S.myGid){
     S.myGid=g.id;S.path=[];
@@ -446,7 +514,7 @@ boardEl.addEventListener('pointermove',e=>{
   else return;
   inp.value=pathWord().toUpperCase();drawPath();
 });
-function endDrag(){if(!dragging)return;dragging=false;if(moved&&S.path.length>=3)submit();}
+function endDrag(){if(!dragging)return;dragging=false;if(moved)submit();} // a swipe of 1-2 letters is rejected by submit(): buzzer plus the trail is dropped
 boardEl.addEventListener('pointerup',endDrag);
 boardEl.addEventListener('pointercancel',()=>{dragging=false;});
 inp.addEventListener('input',()=>{inp.value=inp.value.replace(/[^a-zA-Z]/g,'').toUpperCase();S.path=trace(board,inp.value.toLowerCase())||[];drawPath();setMsg('');});
@@ -474,8 +542,8 @@ function submit(){
 function fmt(ms){const s=Math.max(0,Math.ceil(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
 function show(id){for(const v of ['lobby','count','play','results'])$('#v-'+v).hidden=(v!==id);}
 function renderStatus(){
-  const online=S.list.filter(p=>p.online).length;
-  $('#status').textContent=!S.connected?'Connecting…':online>1?online+' here':'Just you so far';
+  const online=Math.max(S.here||0,S.list.filter(p=>p.online).length);
+  $('#status').textContent=!S.connected?'Connecting…':online>1?online+' here':'Just you';
 }
 function nextBox(container){
   container.textContent='';
@@ -578,6 +646,8 @@ function update(force){
     if(ph==='play'&&lastPhase==='count')sfx.horn();if(ph==='play'&&lastPhase!=='play'){try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}}
     lastPhase=ph;lastGid=gid;render();
   }
+  maybeAskName();
+  {const nm=$('#name');const v=nm.value.slice(0,24);if(v&&v!==S.name&&S.phase==='lobby'){S.name=v;ls('bw-name',v);send({t:'name',name:v});}}
   if(ph==='count'){const cs=Math.max(1,Math.ceil((S.game.startAt-hostNow())/1000));$('#count-n').textContent=String(cs);if(cs!==lastCount){lastCount=cs;sfx.beep();}}else lastCount=99;
   if(ph==='play'){
     const g=S.game,left=g.startAt+g.duration*1000-hostNow();
@@ -593,7 +663,7 @@ $('#copy').addEventListener('click',async()=>{const b=$('#copy');try{await navig
 update(true);
 setInterval(()=>update(false),250);
 connect();
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(!S.ws||S.ws.readyState>1))connect();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)return;if(!S.ws||S.ws.readyState>1){connect();return;}const t0=Date.now();send({t:'ping'});setTimeout(()=>{if(S.lastMsg<t0)reconnectNow();},3500);});
 })();
 </script>
 </body>

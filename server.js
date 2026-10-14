@@ -30,6 +30,9 @@ function rollBoard() {
 
 /* ---------- dictionary (same list the page uses to check words) ---------- */
 const MIN_WORDS = process.env.BOGGLE_MIN_WORDS !== undefined ? Number(process.env.BOGGLE_MIN_WORDS) : 50;
+const MIN_ER = process.env.BOGGLE_MIN_ER !== undefined ? Number(process.env.BOGGLE_MIN_ER) : 3; // "-er rich" board: this many words ending in -er (4+ letters)
+// Boards that are not -er rich are still allowed some of the time (0 = never, 1 = always). 0.3 gives roughly 70% -er rich boards.
+const ER_SOFT = process.env.BOGGLE_ER_SOFT !== undefined ? Number(process.env.BOGGLE_ER_SOFT) : 0.3;
 const MIN_LONG = process.env.BOGGLE_MIN_LONG !== undefined ? Number(process.env.BOGGLE_MIN_LONG) : 7; // at least one word this long (0 = off)
 const WORDS = [];
 {
@@ -59,24 +62,24 @@ for (let i = 0; i < 16; i++) {
 }
 function analyze(b) {
   const out = new Set(), used = new Array(16).fill(false);
-  let longest = 0;
+  let longest = 0, er = 0;
   function go(i, pre) {
     const p = pre + b[i];
     if (!hasPrefix(p)) return;
     used[i] = true;
-    if (p.length >= 3 && WORDSET.has(p)) { out.add(p); if (p.length > longest) longest = p.length; }
+    if (p.length >= 3 && WORDSET.has(p)) { out.add(p); if (p.length > longest) longest = p.length; if (p.length >= 4 && p.endsWith("er")) er++; }
     for (const j of NB[i]) if (!used[j]) go(j, p);
     used[i] = false;
   }
   for (let i = 0; i < 16; i++) go(i, "");
-  return { count: out.size, longest };
+  return { count: out.size, longest, er };
 }
 const countWords = (b) => analyze(b).count;
-const boardOk = (b) => { const a = analyze(b); return a.count >= MIN_WORDS && a.longest >= MIN_LONG; };
-// keep rolling until the board has at least MIN_WORDS words, one of them MIN_LONG+ letters long
+const boardOk = (b) => { const a = analyze(b); return a.count >= MIN_WORDS && a.longest >= MIN_LONG && (a.er >= MIN_ER || rnd(1000) < ER_SOFT * 1000); };
+// keep rolling until the board has at least MIN_WORDS words, one MIN_LONG+ letters long, and (usually) MIN_ER words ending in -er
 function newBoard() {
   let b = rollBoard();
-  for (let tries = 0; tries < 2000 && !boardOk(b); tries++) b = rollBoard();
+  for (let tries = 0; tries < 5000 && !boardOk(b); tries++) b = rollBoard();
   return b;
 }
 
@@ -115,6 +118,7 @@ function snapshotFor(r, viewer) {
   }
   return {
     t: "state", now, meId: viewer.id, game: g, players: list,
+    here: [...r.players.values()].filter((q) => q.ws).length, // everyone connected, named or not
     me: { gid: viewer.gid, words: viewer.gid && g && viewer.gid === g.id ? viewer.words : [] },
   };
 }
@@ -190,6 +194,7 @@ function handleChat(r, p, m) {
 }
 
 function handle(r, ws, m) {
+  if (m.t === "ping") { sendRaw(ws, { t: "pong" }); return; } // lets a phone check that its connection is really alive
   if (m.t === "hello") {
     const key = String(m.key || "").slice(0, 64);
     if (!key) return;

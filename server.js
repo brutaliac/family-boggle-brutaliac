@@ -12,6 +12,8 @@ const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
 
 const PORT = Number(process.env.PORT) || 3000;
+// Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
+const PUBLIC = fs.existsSync(path.join(__dirname, "public", "index.html")) ? path.join(__dirname, "public") : __dirname;
 const COUNTDOWN_MS = Number(process.env.BOGGLE_COUNTDOWN_MS) || 3000;
 const MIN_SECONDS = Number(process.env.BOGGLE_MIN_SECONDS) || 60;
 const FORCE_SECONDS = Number(process.env.BOGGLE_FORCE_SECONDS) || 0; // test hook only
@@ -31,7 +33,7 @@ const MIN_WORDS = process.env.BOGGLE_MIN_WORDS !== undefined ? Number(process.en
 const MIN_LONG = process.env.BOGGLE_MIN_LONG !== undefined ? Number(process.env.BOGGLE_MIN_LONG) : 7; // at least one word this long (0 = off)
 const WORDS = [];
 {
-  const html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(PUBLIC, "index.html"), "utf8");
   const packed = html.match(/PACKED="([^"]+)"/)[1];
   let prev = "";
   for (const m of packed.matchAll(/([0-9A-F])([a-z]+)/g)) {
@@ -187,7 +189,6 @@ function handle(r, ws, m) {
 }
 
 /* ---------- http ---------- */
-const PUBLIC = path.join(__dirname, "public");
 const files = {};
 function load(name, type) {
   const buf = fs.readFileSync(path.join(PUBLIC, name));

@@ -84,7 +84,7 @@ function newBoard() {
 const rooms = new Map();
 function getRoom(name) {
   let r = rooms.get(name);
-  if (!r) { r = { name, game: null, players: new Map(), touched: Date.now() }; rooms.set(name, r); }
+  if (!r) { r = { name, game: null, players: new Map(), chat: [], touched: Date.now() }; rooms.set(name, r); }
   r.touched = Date.now();
   return r;
 }
@@ -123,10 +123,37 @@ function broadcast(r) {
     if (p.ws && p.ws.readyState === 1) { try { p.ws.send(JSON.stringify(snapshotFor(r, p))); } catch (e) { /* ignore */ } }
   }
 }
+// scoring mirrors the page: 3-4 letters 1, 5 -> 2, 6 -> 3, 7 -> 5, 8+ -> 11 (shared words count for everyone)
+const ptsFor = (n) => (n <= 4 ? 1 : n === 5 ? 2 : n === 6 ? 3 : n === 7 ? 5 : 11);
+function traceable(board, word) {
+  const used = new Array(16).fill(false);
+  function go(i, pos) {
+    const t = board[i];
+    if (!word.startsWith(t, pos)) return false;
+    const np = pos + t.length;
+    if (np === word.length) return true;
+    used[i] = true;
+    for (const j of NB[i]) if (!used[j] && go(j, np)) { used[i] = false; return true; }
+    used[i] = false;
+    return false;
+  }
+  for (let i = 0; i < 16; i++) if (go(i, 0)) return true;
+  return false;
+}
+function scoreWords(board, words) {
+  let total = 0;
+  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length);
+  return total;
+}
 function finalize(r, g) {
   if (r.game !== g || g.results) return;
-  g.results = [...r.players.values()].filter((p) => p.gid === g.id)
-    .map((p) => ({ name: p.name || "Player", words: p.words.slice() }));
+  const inRound = [...r.players.values()].filter((p) => p.gid === g.id);
+  const totals = new Map(inRound.map((p) => [p, scoreWords(g.board, p.words)]));
+  const top = Math.max(0, ...totals.values());
+  // a winner needs at least one opponent and at least one point; a tie crowns everyone tied
+  const winners = new Set(inRound.length > 1 && top > 0 ? inRound.filter((p) => totals.get(p) === top) : []);
+  if (winners.size) for (const p of inRound) p.streak = winners.has(p) ? (p.streak || 0) + 1 : 0;
+  g.results = inRound.map((p) => ({ name: p.name || "Player", words: p.words.slice(), streak: p.streak || 0, won: winners.has(p) }));
   broadcast(r);
 }
 
@@ -142,6 +169,26 @@ function sanitizeWords(arr) {
   return out;
 }
 
+/* ---------- chat ---------- */
+const CHAT_KEEP = 100;      // messages remembered per room
+const CHAT_MAX_LEN = 200;
+function cleanChat(s) { return String(s || "").replace(/[\u0000-\u001f\u007f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, CHAT_MAX_LEN); }
+function sendRaw(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch (e) { /* ignore */ } } }
+function broadcastRaw(r, obj) { for (const p of r.players.values()) sendRaw(p.ws, obj); }
+function handleChat(r, p, m) {
+  if (!p.name) return;
+  const text = cleanChat(m.text);
+  if (!text) return;
+  const now = Date.now();
+  p.chatTimes = (p.chatTimes || []).filter((t) => now - t < 8000);
+  if (p.chatTimes.length >= 6) return;          // at most 6 messages per 8 seconds each
+  p.chatTimes.push(now);
+  const msg = { id: crypto.randomBytes(4).toString("hex"), pid: p.id, name: p.name, text, at: now };
+  r.chat.push(msg);
+  if (r.chat.length > CHAT_KEEP) r.chat.splice(0, r.chat.length - CHAT_KEEP);
+  broadcastRaw(r, { t: "chat", msg });
+}
+
 function handle(r, ws, m) {
   if (m.t === "hello") {
     const key = String(m.key || "").slice(0, 64);
@@ -154,10 +201,12 @@ function handle(r, ws, m) {
     const ph = phaseOf(r);
     if (r.game && (ph === "count" || ph === "play") && p.gid !== r.game.id) { p.gid = r.game.id; p.words = []; }
     broadcast(r);
+    sendRaw(ws, { t: "chatlog", msgs: r.chat });
     return;
   }
   const p = ws.player;
   if (!p) return;
+  if (m.t === "chat") { handleChat(r, p, m); return; }
   if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);

@@ -13,7 +13,19 @@ const { WebSocketServer } = require("ws");
 
 const PORT = Number(process.env.PORT) || 3000;
 // Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
-const PUBLIC = fs.existsSync(path.join(__dirname, "public", "index.html")) ? path.join(__dirname, "public") : __dirname;
+// The page can sit in ./public or right next to this file. If an old copy is left in one of them, use the newer build.
+const SERVER_BUILD = "20261016-4";
+function buildOf(dir) {
+  try { const m = /name="boggle-build" content="([0-9-]+)"/.exec(fs.readFileSync(path.join(dir, "index.html"), "utf8")); return m ? m[1] : "0"; } catch (e) { return null; }
+}
+const PUBLIC = (() => {
+  const a = path.join(__dirname, "public"), bb = buildOf(a), cb = buildOf(__dirname);
+  if (bb === null) return __dirname;
+  if (cb === null) return a;
+  return cb > bb ? __dirname : a;
+})();
+const PAGE_BUILD = buildOf(PUBLIC) || "?";
+console.log("Serving the page from " + PUBLIC + " (page build " + PAGE_BUILD + ", server build " + SERVER_BUILD + ")");
 const COUNTDOWN_MS = Number(process.env.BOGGLE_COUNTDOWN_MS) || 3000;
 const MIN_SECONDS = Number(process.env.BOGGLE_MIN_SECONDS) || 60;
 const FORCE_SECONDS = Number(process.env.BOGGLE_FORCE_SECONDS) || 0; // test hook only
@@ -480,6 +492,11 @@ const server = http.createServer((req, res) => {
     const room = (url.searchParams.get("room") || "family").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "family";
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ room, ...boardFor(room), backup: { enabled: backupInfo.enabled, lastOk: backupInfo.lastOk || null, lastError: backupInfo.lastError || null } }));
+    return;
+  }
+  if (url.pathname === "/version") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ server: SERVER_BUILD, page: PAGE_BUILD, servedFrom: PUBLIC === __dirname ? "next to server.js" : "public folder" }));
     return;
   }
   if (url.pathname === "/rejected.txt" || url.pathname === "/rejected.json") {

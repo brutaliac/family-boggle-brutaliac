@@ -75,3 +75,53 @@ You can look at the raw numbers at `/stats.json` (add `?room=name` for another r
 - If a phone loses Wi-Fi, it reconnects by itself and keeps the words it found.
 - Word checking uses a list of about 50,000 everyday English words built into the page
   (obscure Scrabble-only words and names are left out). It lives in `public/index.html`.
+
+## Room voice chat
+
+The Room voice panel is available in the lobby, during rounds, and on results.
+Enter a name, choose **Join voice**, and allow microphone access. **Mute mic**
+turns off outgoing audio while you keep listening; **Leave voice** stops the
+microphone and closes calls. Joining is always manual, including after a lost
+connection. Game sound settings do not mute voice. If the browser blocks incoming
+sound, tap **Enable voice audio**. Headphones help prevent echo.
+
+Voice is audio-only WebRTC, with up to eight participants per room. The app server
+relays connection messages through the existing WebSocket; audio travels between
+participants directly or through your configured TURN relay. The app does not
+record audio. Production microphone access requires HTTPS (localhost works for
+local testing). Room links grant access to both the game and its voice channel.
+
+### Relay configuration for Coolify
+
+STUN discovery works by default, but **configure TURN before relying on voice
+across different households, cellular connections, or restrictive Wi-Fi**. TURN
+provides an alternate route when browsers cannot connect directly.
+
+Use either of these configurations in the Boggle application's Coolify environment:
+
+- For a coturn-compatible relay using shared-secret authentication, set
+  `VOICE_TURN_URLS` to comma-separated URLs such as
+  `turn:relay.example.com:3478,turns:relay.example.com:5349`, and
+  `VOICE_TURN_SECRET` to the same shared secret configured on that relay. The
+  application issues credentials valid for 24 hours; the shared secret is never
+  sent to browsers. Rejoin voice to obtain fresh credentials for a longer session.
+- For a relay provider that supplies ICE configuration, set `VOICE_ICE_SERVERS`
+  to its JSON array of `RTCIceServer` objects, for example
+  `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turns:relay.example.com:5349","username":"<relay-user>","credential":"<relay-password>"}]`.
+  These client credentials are delivered to voice participants; use credentials
+  intended for browser clients. This variable replaces the default STUN list.
+
+Save the environment and redeploy. A TURN relay is a separate service and must
+be reachable directly on its configured transport and media ports; the existing
+Cloudflare HTTP tunnel for the game does not supply a TURN relay. There is no
+need to change the game's HTTP port or WebSocket route.
+
+Try two devices on different networks before inviting everyone. If a participant
+shows a failed connection, check relay configuration, then leave and rejoin voice.
+Mobile browsers may interrupt calls when backgrounded or the phone locks; keep
+the game open during play.
+
+### Checks
+
+Run `npm test` for room isolation, session validation, mute/leave/disconnect,
+replacement tabs, capacity, TURN credentials, and asset delivery checks.

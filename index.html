@@ -329,7 +329,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
       <p class="muted" id="res-sub"></p>
       <p class="records" id="res-records" hidden></p>
       <div class="rank" id="rank"></div>
-      <p class="muted small" id="fxhint" hidden>Press and hold a player’s score to react to it. One reaction each.</p>
+      <p class="muted small" id="fxhint" hidden>Press and hold a player’s score to react to it. You can change your reaction, or tap it again to remove it.</p>
     </div>
     <div class="panel" style="margin-top:18px">
       <h3>Words nobody found</h3>
@@ -469,15 +469,16 @@ function fxBurst(key,from,toId){
     an.onfinish=()=>m.remove();
   }
 }
-function fxMine(toId){const g=S.game;return !!(g&&Array.isArray(g.fx)&&g.fx.some(x=>x.fromId===S.meId&&x.toId===toId));}
+function fxMine(toId){const g=S.game;const x=g&&Array.isArray(g.fx)?g.fx.find(y=>y.fromId===S.meId&&y.toId===toId):null;return x?x.key:null;}
 let fxHeldAt=0,fxOpened=false;
 function fxPick(toId,toName,card){
   rxClose();
   const pop=$('#rxpop');pop.textContent='';pop.classList.add('wide');
-  if(fxMine(toId)){pop.append(h('span',{class:'rxnote',text:'You already reacted to '+toName+'.'}));}
-  else FX.forEach(d=>{const b=h('button',{type:'button',role:'menuitem','aria-label':d.n+' for '+toName},fxFace(d));
-    b.addEventListener('click',ev=>{ev.stopPropagation();rxClose();if(fxMine(toId))return;send({t:'burst',key:d.k,to:toId});
-      const g=S.game;if(g){g.fx=(g.fx||[]).concat([{from:S.name,fromId:S.meId,toId,key:d.k}]);}fxBurst(d.k,S.name,toId);renderResults();});
+  const cur=fxMine(toId);
+  FX.forEach(d=>{const b=h('button',{type:'button',role:'menuitem',class:d.k===cur?'mine':'','aria-label':d.n+' for '+toName+(d.k===cur?' (tap to remove)':'')},fxFace(d));
+    b.addEventListener('click',ev=>{ev.stopPropagation();rxClose();send({t:'burst',key:d.k,to:toId});
+      const g=S.game;if(g){const rest=(g.fx||[]).filter(x=>!(x.fromId===S.meId&&x.toId===toId));g.fx=d.k===cur?rest:rest.concat([{from:S.name,fromId:S.meId,toId,key:d.k}]);}
+      if(d.k!==cur)fxBurst(d.k,S.name,toId);renderResults();});
     pop.append(b);});
   card.classList.add('held');rxTarget={el:card};pop.hidden=false;
   const r=card.getBoundingClientRect(),pw=pop.offsetWidth,ph=pop.offsetHeight;
@@ -831,7 +832,7 @@ function renderResults(){
     rank.append(card);
   }
   {const fh=$('#fxhint');const old=scored.some(p=>!p.id);fh.hidden=scored.length<2;
-   fh.textContent=old?'Reactions are switched off because the server is out of date. Upload the newest server.js to GitHub and redeploy.':'Press and hold a player\u2019s score to react to it. One reaction each.';}
+   fh.textContent=old?'Reactions are switched off because the server is out of date. Upload the newest server.js to GitHub and redeploy.':'Press and hold a player\u2019s score to react to it. You can change your reaction, or tap it again to remove it.';}
   $('#res-sub').textContent='This board had '+all.size+' words in it.';
   {const rb=$('#res-records');const rec=(g.results&&Array.isArray(g.records))?g.records:[];rb.hidden=!rec.length;rb.textContent=rec.length?'\u{1F3C6} New all-time record: '+rec.join(' | '):'';}
   const found=new Set(cnt.keys());const miss=Array.from(all).filter(w=>!found.has(w)).sort(byLen);

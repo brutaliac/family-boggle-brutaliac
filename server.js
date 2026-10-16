@@ -390,15 +390,21 @@ function handleReact(r, p, m) {
 }
 
 const FX_KEYS = ["clap", "gg", "shock", "angry", "nerd", "party", "skull", "sob", "cat", "dog", "joe"];
-// a reaction to one player's round results; each person can react once to each other player per round
+// a reaction to one player's round results; each person has one reaction per other player at a time (change it or tap it again to remove it)
 function handleBurst(r, p, m) {
   const g = r.game;
   if (!p.name || !g || !g.results || !FX_KEYS.includes(m.key)) return;
   const target = g.results.find((x) => x.id === m.to);
   if (!target || target.id === p.id) return;
   g.fx = g.fx || [];
-  if (g.fx.length >= 200 || g.fx.some((x) => x.fromId === p.id && x.toId === target.id)) return;
-  g.fx.push({ from: p.name, fromId: p.id, toId: target.id, key: m.key });
+  const now = Date.now();
+  p.fxTimes = (p.fxTimes || []).filter((t) => now - t < 5000);
+  if (p.fxTimes.length >= 8) return;                  // guards against a stuck or scripted client
+  p.fxTimes.push(now);
+  const i = g.fx.findIndex((x) => x.fromId === p.id && x.toId === target.id);
+  if (i >= 0 && g.fx[i].key === m.key) { g.fx.splice(i, 1); broadcast(r); return; }   // same emoji again takes it back
+  if (i >= 0) g.fx[i] = { from: p.name, fromId: p.id, toId: target.id, key: m.key };  // a different emoji replaces yours
+  else { if (g.fx.length >= 200) return; g.fx.push({ from: p.name, fromId: p.id, toId: target.id, key: m.key }); }
   broadcast(r);
   broadcastRaw(r, { t: "burst", key: m.key, from: p.name, fromId: p.id, toId: target.id });
 }

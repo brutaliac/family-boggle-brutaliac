@@ -107,6 +107,18 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 #homelink:hover,#homelink:focus-visible{text-decoration:underline;text-underline-offset:3px}
 .live{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg);border:2px solid var(--accent);border-radius:12px;padding:10px 12px}
 .live[hidden]{display:none}.live span{font-weight:700}.live button{min-height:40px;padding:6px 14px}
+.seg{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 10px}
+.seg button{min-height:36px;padding:4px 12px;border-width:2px;border-color:var(--line);font-size:.88rem}
+.seg button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.lb-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.lb-list li{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.lb-list .rk{width:1.6em;text-align:center;font-weight:800;color:var(--muted)}
+.lb-list li:nth-child(1) .rk{color:#c58b00}
+.lb-list .nm{flex:1;min-width:0;font-weight:700;overflow-wrap:anywhere}
+.lb-list .vl{font-family:var(--font-display);font-weight:800;font-size:1.15rem;white-space:nowrap}
+.lb-list .sb{display:block;font-weight:400;font-size:.8rem;color:var(--muted)}
+.records{margin:0;font-weight:700;color:var(--accent-ink);background:#ffe2a0;border-radius:10px;padding:8px 12px}
+.records[hidden]{display:none}
 .chat.set{height:auto;max-height:none}
 @media (max-width:420px){header.top h1{font-size:1.02rem;white-space:nowrap;flex:0 1 auto;min-width:0}header.top .top-r{gap:6px;flex:0 0 auto}header.top .top-r .snd{width:36px;min-height:36px;flex:0 0 36px}header.top .top-r .pill{padding:3px 9px;font-size:.82rem;white-space:nowrap;flex:0 0 auto}}
 @media (max-width:340px){header.top h1{font-size:.92rem}header.top .top-r{gap:4px}header.top .top-r .snd{width:32px;min-height:32px;flex:0 0 32px}}
@@ -221,6 +233,12 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
       <button type="button" id="copy">Copy link</button>
     </div>
     <div id="host-box"></div>
+    <div id="lb">
+      <h3>All-time leaderboard</h3>
+      <div class="seg" id="lb-tabs" role="tablist" aria-label="Leaderboard category"></div>
+      <ol class="lb-list" id="lb-list"></ol>
+      <p class="muted small" id="lb-note"></p>
+    </div>
     <details>
       <summary>How to play</summary>
       <p class="small" style="margin-top:10px">Find words of 3 or more letters by linking neighboring letters, sideways, up and down, or diagonally. Each letter cube can be used once per word. The Qu cube counts as both letters. Everyone plays the same board at the same time, and words stay hidden until the time is up. A word found by more than one player scores for each of them.</p>
@@ -273,6 +291,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
     <div class="panel">
       <h2>Round over</h2>
       <p class="muted" id="res-sub"></p>
+      <p class="records" id="res-records" hidden></p>
       <div class="rank" id="rank"></div>
     </div>
     <div class="panel" style="margin-top:18px">
@@ -443,12 +462,33 @@ setInterval(()=>{
   send({t:'ping'});
   if(Date.now()-S.lastMsg>45000)reconnectNow();
 },15000);
+
+/* ---------- all-time leaderboard ---------- */
+const LB=[
+  {id:'wins',label:'Most wins',val:p=>p.wins,show:p=>p.wins+(p.wins===1?' win':' wins'),sub:p=>p.games+(p.games===1?' game':' games')+' played'},
+  {id:'best',label:'Best round',val:p=>p.bestScore,show:p=>p.bestScore+' pts',sub:()=>''},
+  {id:'long',label:'Longest word',val:p=>(p.longestWord||'').length,show:p=>(p.longestWord||'').toUpperCase(),sub:p=>(p.longestWord||'').length+' letters'},
+  {id:'most',label:'Most words',val:p=>p.mostWords,show:p=>p.mostWords+' words',sub:()=>'in one round'},
+  {id:'streak',label:'Win streak',val:p=>p.bestStreak,show:p=>p.bestStreak+' in a row',sub:()=>''},
+  {id:'pts',label:'Total points',val:p=>p.points,show:p=>String(p.points),sub:p=>p.words+' words found'},
+];
+let lbTab=ls('bw-lb')||'wins';if(!LB.some(x=>x.id===lbTab))lbTab='wins';
+function renderBoard(){
+  const tabs=$('#lb-tabs');
+  if(!tabs.firstChild){LB.forEach(x=>{const b=h('button',{type:'button',role:'tab',text:x.label});b.dataset.id=x.id;b.addEventListener('click',()=>{lbTab=x.id;ls('bw-lb',lbTab);renderBoard();});tabs.append(b);});}
+  Array.from(tabs.children).forEach(b=>b.setAttribute('aria-selected',String(b.dataset.id===lbTab)));
+  const cat=LB.find(x=>x.id===lbTab);const list=$('#lb-list');list.textContent='';
+  const rows=((S.stats&&S.stats.players)||[]).filter(p=>cat.val(p)>0).sort((a,b)=>cat.val(b)-cat.val(a)||b.wins-a.wins||b.points-a.points||a.name.localeCompare(b.name)).slice(0,10);
+  rows.forEach((p,i)=>{const sub=cat.sub(p);list.append(h('li',{},h('span',{class:'rk',text:String(i+1)}),h('span',{class:'nm'},p.name),h('span',{class:'vl'},cat.show(p),sub?h('span',{class:'sb',text:sub}):null)));});
+  $('#lb-note').textContent=rows.length?'Counted by name, since the game started keeping score.':'No scores yet. Finish a round with at least one word and the leaderboard starts here.';
+}
+renderBoard();
 function connect(){
   const proto=location.protocol==='https:'?'wss:':'ws:';
   let ws;try{ws=new WebSocket(proto+'//'+location.host+'/ws?room='+encodeURIComponent(ROOM));}catch(e){setTimeout(connect,2000);return;}
   S.ws=ws;
   ws.onopen=()=>{S.connected=true;backoff=800;send({t:'hello',key:S.myKey,name:S.name});if(S.myWords.length)sendWords();renderStatus();};
-  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}S.lastMsg=Date.now();if(m.t==='state')onState(m);else if(m.t==='chat'&&m.msg)chatRender(m.msg,true);else if(m.t==='chatlog'&&Array.isArray(m.msgs)){m.msgs.forEach(x=>chatRender(x,false));chatEmpty();}};
+  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}S.lastMsg=Date.now();if(m.t==='state')onState(m);else if(m.t==='stats'&&m.stats){S.stats=m.stats;renderBoard();}else if(m.t==='chat'&&m.msg)chatRender(m.msg,true);else if(m.t==='chatlog'&&Array.isArray(m.msgs)){m.msgs.forEach(x=>chatRender(x,false));chatEmpty();}};
   ws.onclose=()=>{if(S.ws!==ws)return;S.connected=false;renderStatus();setTimeout(connect,backoff);backoff=Math.min(backoff*1.7,8000);};
   ws.onerror=()=>{try{ws.close();}catch(e){}};
 }
@@ -631,6 +671,7 @@ function renderResults(){
     rank.append(h('div',{class:'who'+(win?' win':'')},head,h('p',{class:'muted small',text:p.rows.length+' word'+(p.rows.length===1?'':'s')}),chips));
   }
   $('#res-sub').textContent='This board had '+all.size+' words in it.';
+  {const rb=$('#res-records');const rec=(g.results&&Array.isArray(g.records))?g.records:[];rb.hidden=!rec.length;rb.textContent=rec.length?'\u{1F3C6} New all-time record: '+rec.join(' | '):'';}
   const found=new Set(cnt.keys());const miss=Array.from(all).filter(w=>!found.has(w)).sort(byLen);
   $('#missed-sub').textContent=miss.length?miss.length+' left on the board. The longest:':'The group found every word on the board.';
   const mc=$('#missed');mc.textContent='';miss.slice(0,30).forEach(w=>mc.append(h('span',{class:'chip',text:w})));buildMini();if(miniFor!==lastMiniGame){lastMiniGame=miniFor;miniWord=null;}showMini(miniWord);

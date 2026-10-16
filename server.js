@@ -149,6 +149,147 @@ function scoreWords(board, words) {
   for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length);
   return total;
 }
+/* ---------- all-time stats: saved to disk, backed up to a private GitHub Gist ---------- */
+// On Render's free plan the disk and memory are wiped whenever the service sleeps or redeploys,
+// so the stats are also copied to a secret Gist on your GitHub account (needs GITHUB_TOKEN).
+// On a home server with a persistent folder the local file is enough and the Gist is just a spare copy.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const STATS_FILE = path.join(DATA_DIR, "stats.json");
+const GIST_NAME = "family-boggle-stats.json";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
+const GITHUB_API = (process.env.GITHUB_API_BASE || "https://api.github.com").replace(/\/$/, "");
+const PUSH_DELAY_MS = Number(process.env.BOGGLE_BACKUP_DELAY_MS) || 15000;
+let gistId = process.env.GIST_ID || "";
+let stats = { version: 1, updatedAt: 0, rooms: {} };
+let pushTimer = null, pushing = false, pushAgain = false;
+const backupInfo = { enabled: !!GITHUB_TOKEN, lastOk: 0, lastError: "" };
+
+function validStats(o) { return o && typeof o === "object" && o.rooms && typeof o.rooms === "object"; }
+function loadStatsFile() {
+  try { const o = JSON.parse(fs.readFileSync(STATS_FILE, "utf8")); return validStats(o) ? o : null; } catch (e) { return null; }
+}
+function writeStatsFile() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = STATS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(stats));
+    fs.renameSync(tmp, STATS_FILE);
+  } catch (e) { console.log("Could not write " + STATS_FILE + ": " + e.message); }
+}
+async function gh(pathPart, opts = {}) {
+  const res = await fetch(GITHUB_API + pathPart, {
+    ...opts,
+    headers: {
+      authorization: "Bearer " + GITHUB_TOKEN, accept: "application/vnd.github+json",
+      "user-agent": "family-boggle", "x-github-api-version": "2022-11-28", "content-type": "application/json",
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error("GitHub " + res.status + " on " + (opts.method || "GET") + " " + pathPart);
+  return res.json();
+}
+async function findGist() {
+  if (gistId) return gistId;
+  for (let page = 1; page <= 5; page++) {
+    const list = await gh("/gists?per_page=100&page=" + page);
+    if (!Array.isArray(list) || !list.length) break;
+    const hit = list.find((g) => g.files && g.files[GIST_NAME]);
+    if (hit) { gistId = hit.id; return gistId; }
+  }
+  return "";
+}
+async function pullBackup() {
+  if (!GITHUB_TOKEN) return null;
+  try {
+    const id = await findGist();
+    if (!id) return null;
+    const g = await gh("/gists/" + id);
+    const f = g.files && g.files[GIST_NAME];
+    if (!f || typeof f.content !== "string") return null;
+    const o = JSON.parse(f.content);
+    return validStats(o) ? o : null;
+  } catch (e) { backupInfo.lastError = String(e.message || e); console.log("Backup read failed: " + backupInfo.lastError); return null; }
+}
+async function pushBackup() {
+  if (!GITHUB_TOKEN) return;
+  if (pushing) { pushAgain = true; return; }
+  pushing = true;
+  try {
+    const content = JSON.stringify(stats);
+    let id = await findGist();
+    if (!id) {
+      const made = await gh("/gists", { method: "POST", body: JSON.stringify({ description: "Family Boggle all-time stats (backup, do not edit)", public: false, files: { [GIST_NAME]: { content } } }) });
+      gistId = made.id;
+      console.log("Created private backup Gist " + gistId);
+    } else {
+      await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_NAME]: { content } } }) });
+    }
+    backupInfo.lastOk = Date.now(); backupInfo.lastError = "";
+  } catch (e) { backupInfo.lastError = String(e.message || e); console.log("Backup write failed: " + backupInfo.lastError); }
+  finally { pushing = false; if (pushAgain) { pushAgain = false; scheduleBackup(); } }
+}
+function scheduleBackup() { if (!GITHUB_TOKEN || pushTimer) return; pushTimer = setTimeout(() => { pushTimer = null; pushBackup(); }, PUSH_DELAY_MS); }
+async function flushBackup() { if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; } await pushBackup(); }
+function saveStats() { stats.updatedAt = Date.now(); writeStatsFile(); scheduleBackup(); }
+async function initStats() {
+  const local = loadStatsFile();
+  const backup = await Promise.race([pullBackup(), new Promise((r) => setTimeout(() => r(null), 12000))]);
+  const best = [local, backup].filter(Boolean).sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0))[0];
+  if (best) stats = best;
+  if (best && best === backup) writeStatsFile();
+  console.log("Stats loaded (" + (best === backup && backup ? "from backup" : best ? "from disk" : "new") + "), rooms: " + Object.keys(stats.rooms).length + (GITHUB_TOKEN ? ", GitHub backup on" : ", GitHub backup off (set GITHUB_TOKEN to turn on)"));
+}
+
+const nameKey = (n) => String(n || "").trim().toLowerCase().slice(0, 24);
+function statRoom(name) { return (stats.rooms[name] = stats.rooms[name] || { players: {} }); }
+function boardFor(name) {
+  const room = stats.rooms[name];
+  const players = room ? Object.values(room.players).map((p) => ({
+    name: p.name, games: p.games, wins: p.wins, points: p.points, words: p.words,
+    bestScore: p.bestScore, longestWord: p.longestWord || "", mostWords: p.mostWords, bestStreak: p.bestStreak,
+  })) : [];
+  return { players };
+}
+function validWordList(board, words) {
+  const out = [];
+  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) out.push(w);
+  return out;
+}
+// folds one finished round into the all-time stats; returns short "new record" messages
+function recordRound(r, g, inRound, totals, winners) {
+  const room = statRoom(r.name);
+  const prev = { score: 0, wordLen: 0, words: 0, streak: 0 };
+  for (const p of Object.values(room.players)) {
+    prev.score = Math.max(prev.score, p.bestScore || 0); prev.wordLen = Math.max(prev.wordLen, (p.longestWord || "").length);
+    prev.words = Math.max(prev.words, p.mostWords || 0); prev.streak = Math.max(prev.streak, p.bestStreak || 0);
+  }
+  const best = { score: null, wordLen: null, words: null, streak: null };
+  const now = Date.now();
+  for (const p of inRound) {
+    const valid = validWordList(g.board, p.words);
+    if (!valid.length && !p.ws) continue; // someone who left a tab open and never played does not get a game
+    const key = nameKey(p.name);
+    if (!key) continue;
+    if (!room.players[key] && Object.keys(room.players).length >= 200) continue;
+    const e = (room.players[key] = room.players[key] || { name: p.name, games: 0, wins: 0, points: 0, words: 0, bestScore: 0, mostWords: 0, longestWord: "", bestStreak: 0 });
+    e.name = p.name; e.games++; e.points += totals.get(p); e.words += valid.length; e.last = now;
+    if (winners.has(p)) e.wins++;
+    const sc = totals.get(p);
+    if (sc > e.bestScore) { e.bestScore = sc; e.bestScoreAt = now; if (sc > prev.score && (!best.score || sc > best.score.v)) best.score = { n: p.name, v: sc }; }
+    if (valid.length > e.mostWords) { e.mostWords = valid.length; if (valid.length > prev.words && (!best.words || valid.length > best.words.v)) best.words = { n: p.name, v: valid.length }; }
+    const lw = valid.slice().sort((x, y) => y.length - x.length || (x < y ? -1 : 1))[0];
+    if (lw && lw.length > (e.longestWord || "").length) { e.longestWord = lw; if (lw.length > prev.wordLen && (!best.wordLen || lw.length > best.wordLen.v.length)) best.wordLen = { n: p.name, v: lw }; }
+    if ((p.streak || 0) > e.bestStreak) { e.bestStreak = p.streak; if (p.streak > prev.streak && (!best.streak || p.streak > best.streak.v)) best.streak = { n: p.name, v: p.streak }; }
+  }
+  saveStats();
+  const msgs = [];
+  if (prev.score > 0 && best.score) msgs.push(best.score.n + ": best round ever, " + best.score.v + " points");
+  if (prev.wordLen > 0 && best.wordLen) msgs.push(best.wordLen.n + ": longest word ever, " + best.wordLen.v.toUpperCase());
+  if (prev.words > 0 && best.words) msgs.push(best.words.n + ": most words in a round, " + best.words.v);
+  if (prev.streak > 0 && best.streak) msgs.push(best.streak.n + ": longest win streak, " + best.streak.v);
+  return msgs;
+}
+
 function finalize(r, g) {
   if (r.game !== g || g.results) return;
   const inRound = [...r.players.values()].filter((p) => p.gid === g.id);
@@ -158,7 +299,9 @@ function finalize(r, g) {
   const winners = new Set(inRound.length > 1 && top > 0 ? inRound.filter((p) => totals.get(p) === top) : []);
   if (winners.size) for (const p of inRound) p.streak = winners.has(p) ? (p.streak || 0) + 1 : 0;
   g.results = inRound.map((p) => ({ name: p.name || "Player", words: p.words.slice(), streak: p.streak || 0, won: winners.has(p) }));
+  try { g.records = recordRound(r, g, inRound, totals, winners); } catch (e) { console.log("Stats error: " + e.message); g.records = []; }
   broadcast(r);
+  broadcastRaw(r, { t: "stats", stats: boardFor(r.name) });
 }
 
 function sanitizeWords(arr) {
@@ -207,6 +350,7 @@ function handle(r, ws, m) {
     if (r.game && (ph === "count" || ph === "play") && p.gid !== r.game.id) { p.gid = r.game.id; p.words = []; }
     broadcast(r);
     sendRaw(ws, { t: "chatlog", msgs: r.chat });
+    sendRaw(ws, { t: "stats", stats: boardFor(r.name) });
     return;
   }
   const p = ws.player;
@@ -256,6 +400,12 @@ files["/"] = files["/index.html"];
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/healthz") { res.writeHead(200, { "content-type": "text/plain" }); res.end("ok"); return; }
+  if (url.pathname === "/stats.json") {
+    const room = (url.searchParams.get("room") || "family").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "family";
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ room, ...boardFor(room), backup: { enabled: backupInfo.enabled, lastOk: backupInfo.lastOk || null, lastError: backupInfo.lastError || null } }));
+    return;
+  }
   const f = files[url.pathname];
   if (!f) { res.writeHead(404, { "content-type": "text/plain" }); res.end("Not found"); return; }
   const headers = { "content-type": f.type, "cache-control": f.type.startsWith("image") ? "public, max-age=86400" : "no-cache" };
@@ -298,4 +448,13 @@ setInterval(() => {
   for (const [k, r] of rooms) if (r.touched < cutoff && ![...r.players.values()].some((p) => p.ws)) rooms.delete(k);
 }, 3600 * 1000);
 
-server.listen(PORT, () => console.log("Family Boggle listening on port " + PORT));
+initStats().catch((e) => console.log("Stats init failed: " + e.message)).then(() => {
+  server.listen(PORT, () => console.log("Family Boggle listening on port " + PORT));
+});
+// Render (and Docker) send SIGTERM before stopping: save everything first
+let stopping = false;
+for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => {
+  if (stopping) return; stopping = true;
+  writeStatsFile();
+  Promise.race([flushBackup(), new Promise((r) => setTimeout(r, 8000))]).then(() => process.exit(0));
+});

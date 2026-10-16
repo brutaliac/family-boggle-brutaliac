@@ -161,6 +161,11 @@ const GITHUB_API = (process.env.GITHUB_API_BASE || "https://api.github.com").rep
 const PUSH_DELAY_MS = Number(process.env.BOGGLE_BACKUP_DELAY_MS) || 15000;
 let gistId = process.env.GIST_ID || "";
 let stats = { version: 1, updatedAt: 0, rooms: {} };
+// words players typed that were on the board but not in the word list, so the list can be improved later
+const REJ_FILE = path.join(DATA_DIR, "rejected.json");
+const REJ_GIST = "family-boggle-rejected.json";
+const REJ_MAX = 5000;
+let rejected = { version: 1, updatedAt: 0, words: {} };
 let pushTimer = null, pushing = false, pushAgain = false;
 const backupInfo = { enabled: !!GITHUB_TOKEN, lastOk: 0, lastError: "" };
 
@@ -198,12 +203,15 @@ async function findGist() {
   }
   return "";
 }
+function validRej(o) { return o && typeof o === "object" && o.words && typeof o.words === "object"; }
+let rejBackup = null;
 async function pullBackup() {
   if (!GITHUB_TOKEN) return null;
   try {
     const id = await findGist();
     if (!id) return null;
     const g = await gh("/gists/" + id);
+    try { const rf = g.files && g.files[REJ_GIST]; if (rf && typeof rf.content === "string") { const o = JSON.parse(rf.content); if (validRej(o)) rejBackup = o; } } catch (e) { /* ignore */ }
     const f = g.files && g.files[GIST_NAME];
     if (!f || typeof f.content !== "string") return null;
     const o = JSON.parse(f.content);
@@ -216,13 +224,14 @@ async function pushBackup() {
   pushing = true;
   try {
     const content = JSON.stringify(stats);
+    const rcontent = JSON.stringify(rejected);
     let id = await findGist();
     if (!id) {
-      const made = await gh("/gists", { method: "POST", body: JSON.stringify({ description: "Family Boggle all-time stats (backup, do not edit)", public: false, files: { [GIST_NAME]: { content } } }) });
+      const made = await gh("/gists", { method: "POST", body: JSON.stringify({ description: "Family Boggle all-time stats (backup, do not edit)", public: false, files: { [GIST_NAME]: { content }, [REJ_GIST]: { content: rcontent } } }) });
       gistId = made.id;
       console.log("Created private backup Gist " + gistId);
     } else {
-      await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_NAME]: { content } } }) });
+      await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_NAME]: { content }, [REJ_GIST]: { content: rcontent } } }) });
     }
     backupInfo.lastOk = Date.now(); backupInfo.lastError = "";
   } catch (e) { backupInfo.lastError = String(e.message || e); console.log("Backup write failed: " + backupInfo.lastError); }
@@ -231,12 +240,39 @@ async function pushBackup() {
 function scheduleBackup() { if (!GITHUB_TOKEN || pushTimer) return; pushTimer = setTimeout(() => { pushTimer = null; pushBackup(); }, PUSH_DELAY_MS); }
 async function flushBackup() { if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; } await pushBackup(); }
 function saveStats() { stats.updatedAt = Date.now(); writeStatsFile(); scheduleBackup(); }
+function writeRejFile() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = REJ_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(rejected));
+    fs.renameSync(tmp, REJ_FILE);
+  } catch (e) { console.log("Could not write " + REJ_FILE + ": " + e.message); }
+}
+function saveRejected() { rejected.updatedAt = Date.now(); writeRejFile(); scheduleBackup(); }
+function handleReject(r, p, m) {
+  const w = String(m.word || "").toLowerCase();
+  if (!p.name || !/^[a-z]{3,16}$/.test(w) || WORDSET.has(w)) return;
+  const g = r.game;
+  if (!g || p.gid !== g.id || !traceable(g.board, w)) return;       // only real attempts: on the board, just not in the list
+  p.rejSeen = p.rejSeen && p.rejSeen.gid === g.id ? p.rejSeen : { gid: g.id, set: new Set() };
+  if (p.rejSeen.set.has(w) || p.rejSeen.set.size >= 60) return;     // count a word once per player per round
+  p.rejSeen.set.add(w);
+  const e = rejected.words[w];
+  if (e) { e.n++; e.last = Date.now(); }
+  else { if (Object.keys(rejected.words).length >= REJ_MAX) return; rejected.words[w] = { n: 1, first: Date.now(), last: Date.now() }; }
+  saveRejected();
+}
+function rejectedList(min) {
+  return Object.entries(rejected.words).filter(([w, e]) => e.n >= min).sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]));
+}
 async function initStats() {
+  try { const o = JSON.parse(fs.readFileSync(REJ_FILE, "utf8")); if (validRej(o)) rejected = o; } catch (e) { /* none yet */ }
   const local = loadStatsFile();
   const backup = await Promise.race([pullBackup(), new Promise((r) => setTimeout(() => r(null), 12000))]);
   const best = [local, backup].filter(Boolean).sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0))[0];
   if (best) stats = best;
   if (best && best === backup) writeStatsFile();
+  if (rejBackup && (rejBackup.updatedAt || 0) > (rejected.updatedAt || 0)) { rejected = rejBackup; writeRejFile(); }
   console.log("Stats loaded (" + (best === backup && backup ? "from backup" : best ? "from disk" : "new") + "), rooms: " + Object.keys(stats.rooms).length + (GITHUB_TOKEN ? ", GitHub backup on" : ", GitHub backup off (set GITHUB_TOKEN to turn on)"));
 }
 
@@ -298,7 +334,7 @@ function finalize(r, g) {
   // a winner needs at least one opponent and at least one point; a tie crowns everyone tied
   const winners = new Set(inRound.length > 1 && top > 0 ? inRound.filter((p) => totals.get(p) === top) : []);
   if (winners.size) for (const p of inRound) p.streak = winners.has(p) ? (p.streak || 0) + 1 : 0;
-  g.results = inRound.map((p) => ({ name: p.name || "Player", words: p.words.slice(), streak: p.streak || 0, won: winners.has(p) }));
+  g.results = inRound.map((p) => ({ id: p.id, name: p.name || "Player", words: p.words.slice(), streak: p.streak || 0, won: winners.has(p) }));
   try { g.records = recordRound(r, g, inRound, totals, winners); } catch (e) { console.log("Stats error: " + e.message); g.records = []; }
   broadcast(r);
   broadcastRaw(r, { t: "stats", stats: boardFor(r.name) });
@@ -336,7 +372,7 @@ function handleChat(r, p, m) {
   broadcastRaw(r, { t: "chat", msg });
 }
 
-const REACTIONS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F62E}", "\u{1F44F}", "\u{1F622}", "\u{1F525}"];
+const REACTIONS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F973}", "\u{1F62E}", "\u{1F44F}", "\u{1F622}", "\u{1F525}"];
 function handleReact(r, p, m) {
   if (!p.name || !REACTIONS.includes(m.emoji)) return;
   const msg = r.chat.find((x) => x.id === m.id);
@@ -353,14 +389,18 @@ function handleReact(r, p, m) {
   broadcastRaw(r, { t: "react", id: msg.id, rx: msg.rx });
 }
 
-const FX_KEYS = ["clap", "gg", "shock", "angry", "nerd", "party", "skull", "sob", "cat", "dog"];
+const FX_KEYS = ["clap", "gg", "shock", "angry", "nerd", "party", "skull", "sob", "cat", "dog", "joe"];
+// a reaction to one player's round results; each person can react once to each other player per round
 function handleBurst(r, p, m) {
-  if (!p.name || !FX_KEYS.includes(m.key)) return;
-  const now = Date.now();
-  p.fxTimes = (p.fxTimes || []).filter((t) => now - t < 5000);
-  if (p.fxTimes.length >= 8) return;
-  p.fxTimes.push(now);
-  broadcastRaw(r, { t: "burst", key: m.key, pid: p.id, name: p.name });
+  const g = r.game;
+  if (!p.name || !g || !g.results || !FX_KEYS.includes(m.key)) return;
+  const target = g.results.find((x) => x.id === m.to);
+  if (!target || target.id === p.id) return;
+  g.fx = g.fx || [];
+  if (g.fx.length >= 200 || g.fx.some((x) => x.fromId === p.id && x.toId === target.id)) return;
+  g.fx.push({ from: p.name, fromId: p.id, toId: target.id, key: m.key });
+  broadcast(r);
+  broadcastRaw(r, { t: "burst", key: m.key, from: p.name, fromId: p.id, toId: target.id });
 }
 
 function handle(r, ws, m) {
@@ -385,6 +425,7 @@ function handle(r, ws, m) {
   if (m.t === "chat") { handleChat(r, p, m); return; }
   if (m.t === "react") { handleReact(r, p, m); return; }
   if (m.t === "burst") { handleBurst(r, p, m); return; }
+  if (m.t === "reject") { handleReject(r, p, m); return; }
   if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);
@@ -433,6 +474,18 @@ const server = http.createServer((req, res) => {
     const room = (url.searchParams.get("room") || "family").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "family";
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ room, ...boardFor(room), backup: { enabled: backupInfo.enabled, lastOk: backupInfo.lastOk || null, lastError: backupInfo.lastError || null } }));
+    return;
+  }
+  if (url.pathname === "/rejected.txt" || url.pathname === "/rejected.json") {
+    const min = Math.max(1, Number(url.searchParams.get("min")) || 1);
+    const list = rejectedList(min);
+    if (url.pathname === "/rejected.json") {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ total: list.length, words: list.map(([word, e]) => ({ word, count: e.n, last: new Date(e.last).toISOString() })) }));
+    } else {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end(list.length ? list.map(([w, e]) => w + " " + e.n).join("\n") + "\n" : "(no rejected words yet)\n");
+    }
     return;
   }
   const f = files[url.pathname];

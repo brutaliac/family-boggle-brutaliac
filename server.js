@@ -353,6 +353,16 @@ function handleReact(r, p, m) {
   broadcastRaw(r, { t: "react", id: msg.id, rx: msg.rx });
 }
 
+const FX_KEYS = ["clap", "gg", "shock", "angry", "nerd", "party", "skull", "sob", "cat", "dog"];
+function handleBurst(r, p, m) {
+  if (!p.name || !FX_KEYS.includes(m.key)) return;
+  const now = Date.now();
+  p.fxTimes = (p.fxTimes || []).filter((t) => now - t < 5000);
+  if (p.fxTimes.length >= 8) return;
+  p.fxTimes.push(now);
+  broadcastRaw(r, { t: "burst", key: m.key, pid: p.id, name: p.name });
+}
+
 function handle(r, ws, m) {
   if (m.t === "ping") { sendRaw(ws, { t: "pong" }); return; } // lets a phone check that its connection is really alive
   if (m.t === "hello") {
@@ -374,6 +384,7 @@ function handle(r, ws, m) {
   if (!p) return;
   if (m.t === "chat") { handleChat(r, p, m); return; }
   if (m.t === "react") { handleReact(r, p, m); return; }
+  if (m.t === "burst") { handleBurst(r, p, m); return; }
   if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);

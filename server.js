@@ -336,6 +336,23 @@ function handleChat(r, p, m) {
   broadcastRaw(r, { t: "chat", msg });
 }
 
+const REACTIONS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}", "\u{1F62E}", "\u{1F44F}", "\u{1F622}", "\u{1F525}"];
+function handleReact(r, p, m) {
+  if (!p.name || !REACTIONS.includes(m.emoji)) return;
+  const msg = r.chat.find((x) => x.id === m.id);
+  if (!msg) return;
+  const now = Date.now();
+  p.reactTimes = (p.reactTimes || []).filter((t) => now - t < 5000);
+  if (p.reactTimes.length >= 10) return;
+  p.reactTimes.push(now);
+  msg.rx = msg.rx || {};
+  const arr = msg.rx[m.emoji] || (msg.rx[m.emoji] = []);
+  const i = arr.indexOf(p.id);
+  if (i >= 0) arr.splice(i, 1); else arr.push(p.id);
+  if (!arr.length) delete msg.rx[m.emoji];
+  broadcastRaw(r, { t: "react", id: msg.id, rx: msg.rx });
+}
+
 function handle(r, ws, m) {
   if (m.t === "ping") { sendRaw(ws, { t: "pong" }); return; } // lets a phone check that its connection is really alive
   if (m.t === "hello") {
@@ -356,6 +373,7 @@ function handle(r, ws, m) {
   const p = ws.player;
   if (!p) return;
   if (m.t === "chat") { handleChat(r, p, m); return; }
+  if (m.t === "react") { handleReact(r, p, m); return; }
   if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);

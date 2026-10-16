@@ -830,7 +830,8 @@ function renderResults(){
     if(p.id&&p.id!==S.meId)fxAttach(card,p.id,p.name);
     rank.append(card);
   }
-  $('#fxhint').hidden=scored.length<2;
+  {const fh=$('#fxhint');const old=scored.some(p=>!p.id);fh.hidden=scored.length<2;
+   fh.textContent=old?'Reactions are switched off because the server is out of date. Upload the newest server.js to GitHub and redeploy.':'Press and hold a player\u2019s score to react to it. One reaction each.';}
   $('#res-sub').textContent='This board had '+all.size+' words in it.';
   {const rb=$('#res-records');const rec=(g.results&&Array.isArray(g.records))?g.records:[];rb.hidden=!rec.length;rb.textContent=rec.length?'\u{1F3C6} New all-time record: '+rec.join(' | '):'';}
   const found=new Set(cnt.keys());const miss=Array.from(all).filter(w=>!found.has(w)).sort(byLen);

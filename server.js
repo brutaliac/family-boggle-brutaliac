@@ -370,6 +370,70 @@ const CHAT_MAX_LEN = 200;
 function cleanChat(s) { return String(s || "").replace(/[\u0000-\u001f\u007f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, CHAT_MAX_LEN); }
 function sendRaw(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch (e) { /* ignore */ } } }
 function broadcastRaw(r, obj) { for (const p of r.players.values()) sendRaw(p.ws, obj); }
+/* Voice media travels over WebRTC; this server only relays room-local signaling. */
+const VOICE_LIMIT = 8;
+const ICE_SERVERS = (() => {
+  const fallback = [{ urls: "stun:stun.l.google.com:19302" }];
+  if (!process.env.VOICE_ICE_SERVERS) return fallback;
+  const servers = JSON.parse(process.env.VOICE_ICE_SERVERS);
+  if (!Array.isArray(servers) || !servers.length || servers.some(s => !s ||
+    !(typeof s.urls === "string" || (Array.isArray(s.urls) && s.urls.length && s.urls.every(u => typeof u === "string"))))) {
+    throw new Error("VOICE_ICE_SERVERS must be a non-empty JSON array of RTCIceServer objects");
+  }
+  return servers;
+})();
+const TURN_URLS = (process.env.VOICE_TURN_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
+if (TURN_URLS.length && !process.env.VOICE_TURN_SECRET) throw new Error("VOICE_TURN_URLS requires VOICE_TURN_SECRET");
+function voiceIceFor(p) {
+  if (!TURN_URLS.length) return ICE_SERVERS;
+  // coturn's shared-secret authentication: clients get expiring credentials, never the secret.
+  const username = Math.floor(Date.now() / 1000 + 86400) + ":" + p.id;
+  const credential = crypto.createHmac("sha1", process.env.VOICE_TURN_SECRET).update(username).digest("base64");
+  return [...ICE_SERVERS, { urls: TURN_URLS, username, credential }];
+}
+function voiceRoster(r) {
+  return [...r.players.values()].filter(p => p.ws && p.voice).map(p => ({
+    id: p.id, name: p.name, muted: p.voiceMuted, session: p.voice,
+  }));
+}
+function broadcastVoice(r) { broadcastRaw(r, { t: "voice-roster", peers: voiceRoster(r) }); }
+function leaveVoice(r, p) {
+  if (!p.voice) return;
+  p.voice = null; p.voiceMuted = true;
+  broadcastVoice(r);
+}
+function handleVoice(r, p, m) {
+  if (m.t === "voice-join") {
+    if (!p.name) { sendRaw(p.ws, { t: "voice-error", message: "Enter your name before joining voice." }); return; }
+    if (!p.voice && voiceRoster(r).length >= VOICE_LIMIT) {
+      sendRaw(p.ws, { t: "voice-error", message: "Voice is full (8 people)." }); return;
+    }
+    p.voice = p.voice || crypto.randomBytes(8).toString("hex");
+    p.voiceMuted = !!m.muted;
+    sendRaw(p.ws, { t: "voice-ready", iceServers: voiceIceFor(p), session: p.voice });
+    broadcastVoice(r); return;
+  }
+  if (m.t === "voice-leave") { leaveVoice(r, p); return; }
+  if (!p.voice) return;
+  if (m.t === "voice-mute") { p.voiceMuted = !!m.muted; broadcastVoice(r); return; }
+  if (m.t !== "voice-signal" || m.session !== p.voice) return;
+  const target = [...r.players.values()].find(q => q.id === m.to && q.id !== p.id && q.ws && q.voice && q.voice === m.toSession);
+  if (!target) return;
+  const d = m.description, c = m.candidate;
+  let signal;
+  if (d && ["offer", "answer"].includes(d.type) && typeof d.sdp === "string" && d.sdp.length <= 16000) {
+    signal = { description: { type: d.type, sdp: d.sdp } };
+  } else if (c && typeof c.candidate === "string" && c.candidate.length <= 2048) {
+    signal = { candidate: { candidate: c.candidate, sdpMid: typeof c.sdpMid === "string" ? c.sdpMid.slice(0, 256) : null,
+      sdpMLineIndex: Number.isInteger(c.sdpMLineIndex) ? c.sdpMLineIndex : null,
+      usernameFragment: typeof c.usernameFragment === "string" ? c.usernameFragment.slice(0, 256) : undefined } };
+  } else return;
+  const now = Date.now();
+  p.voiceSignals = (p.voiceSignals || []).filter(t => now - t < 10000);
+  if (p.voiceSignals.length >= 300) return;
+  p.voiceSignals.push(now);
+  sendRaw(target.ws, { t: "voice-signal", from: p.id, session: p.voice, toSession: target.voice, ...signal });
+}
 function handleChat(r, p, m) {
   if (!p.name) return;
   const text = cleanChat(m.text);
@@ -428,7 +492,7 @@ function handle(r, ws, m) {
     if (!key) return;
     let p = r.players.get(key);
     if (!p) { p = { id: crypto.randomBytes(5).toString("hex"), key, name: "", ws: null, gid: null, words: [] }; r.players.set(key, p); }
-    if (p.ws && p.ws !== ws) { try { p.ws.close(); } catch (e) { /* ignore */ } }
+    if (p.ws && p.ws !== ws) { leaveVoice(r, p); try { p.ws.close(); } catch (e) { /* ignore */ } }
     p.ws = ws; ws.player = p;
     p.name = cleanName(m.name) || p.name;
     const ph = phaseOf(r);
@@ -436,15 +500,17 @@ function handle(r, ws, m) {
     broadcast(r);
     sendRaw(ws, { t: "chatlog", msgs: r.chat });
     sendRaw(ws, { t: "stats", stats: boardFor(r.name) });
+    sendRaw(ws, { t: "voice-roster", peers: voiceRoster(r) });
     return;
   }
   const p = ws.player;
-  if (!p) return;
+  if (!p || p.ws !== ws) return;
+  if (typeof m.t === "string" && m.t.startsWith("voice-")) { handleVoice(r, p, m); return; }
   if (m.t === "chat") { handleChat(r, p, m); return; }
   if (m.t === "react") { handleReact(r, p, m); return; }
   if (m.t === "burst") { handleBurst(r, p, m); return; }
   if (m.t === "reject") { handleReject(r, p, m); return; }
-  if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
+  if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); if (p.voice) broadcastVoice(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);
     if (ph !== "lobby" && ph !== "done") return;
@@ -483,6 +549,7 @@ function load(name, type) {
 load("index.html", "text/html; charset=utf-8");
 load("manifest.webmanifest", "application/manifest+json");
 load("icon.png", "image/png");
+load("voice.js", "text/javascript; charset=utf-8");
 files["/"] = files["/index.html"];
 
 const server = http.createServer((req, res) => {
@@ -535,7 +602,7 @@ wss.on("connection", (ws, req) => {
   });
   ws.on("close", () => {
     const p = ws.player;
-    if (p && p.ws === ws) { p.ws = null; broadcast(r); }
+    if (p && p.ws === ws) { p.ws = null; leaveVoice(r, p); broadcast(r); }
   });
   ws.on("error", () => {});
 });

@@ -14,7 +14,7 @@ const { WebSocketServer } = require("ws");
 const PORT = Number(process.env.PORT) || 3000;
 // Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
 // The page can sit in ./public or right next to this file. If an old copy is left in one of them, use the newer build.
-const SERVER_BUILD = "20261016-4";
+const SERVER_BUILD = "20261016-5";
 function buildOf(dir) {
   try { const m = /name="boggle-build" content="([0-9-]+)"/.exec(fs.readFileSync(path.join(dir, "index.html"), "utf8")); return m ? m[1] : "0"; } catch (e) { return null; }
 }
@@ -407,7 +407,7 @@ function handleBurst(r, p, m) {
   const g = r.game;
   if (!p.name || !g || !g.results || !FX_KEYS.includes(m.key)) return;
   const target = g.results.find((x) => x.id === m.to);
-  if (!target || target.id === p.id) return;
+  if (!target) return;
   g.fx = g.fx || [];
   const now = Date.now();
   p.fxTimes = (p.fxTimes || []).filter((t) => now - t < 5000);

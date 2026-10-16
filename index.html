@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="boggle-build" content="20261016-4">
+<meta name="boggle-build" content="20261016-5">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1d3b4f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -346,7 +346,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
   <div class="chat-head"><strong>Settings</strong><button type="button" id="setclose">Close</button></div>
   <form class="set-body" id="setform" autocomplete="off">
     <p class="muted" id="set-note">Everyone in the game sees this name.</p>
-    <p class="muted small" id="buildline">Page version 20261016-4</p>
+    <p class="muted small" id="buildline">Page version 20261016-5</p>
     <label for="setname"><strong>Your name</strong></label>
     <input type="text" id="setname" maxlength="24" placeholder="Enter your name" enterkeyhint="done" autocomplete="off">
     <button type="submit" class="primary">Save name</button>
@@ -830,7 +830,7 @@ function renderResults(){
     p.rows.forEach((r,idx)=>chips.append(h('span',{class:'chip'+(r.gone?' gone':'')+(!r.gone&&idx===0&&r.w.length>=6?' best':''),title:r.gone?'Another player found this too':r.v+' pt',text:r.w})));
     const head=h('div',{class:'who-head'},h('span',{class:'name'},win?crownIcon():null,p.name,win?h('span',{class:'tag',text:'Winner'}):null,(win&&g.results&&p.streak>=2)?h('span',{class:'streak',title:p.streak+' round wins in a row',text:'\u{1F525} '+p.streak+' in a row'}):null),h('span',{class:'score',text:String(p.total)}));
     const card=h('div',{class:'who'+(win?' win':''),'data-pid':p.id||''},head,h('p',{class:'muted small',text:p.rows.length+' word'+(p.rows.length===1?'':'s')}),chips,fxChips(p.id));
-    if(p.id&&p.id!==S.meId)fxAttach(card,p.id,p.name);
+    if(p.id)fxAttach(card,p.id,p.name);
     rank.append(card);
   }
   {const fh=$('#fxhint');const old=scored.some(p=>!p.id);fh.hidden=scored.length<2;

@@ -138,17 +138,14 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 .rxc{font:inherit;font-size:.85rem;line-height:1;min-height:0;padding:3px 8px;border-radius:99px;border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer}
 .rxc.mine{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .cm.me .rxc{background:rgba(255,255,255,.25);color:inherit}
-.rxpick{display:none;gap:2px;margin-top:6px;flex-wrap:wrap}
-.cm.pick .rxpick{display:flex}
-.rxpick button{font-size:1.25rem;line-height:1;min-height:0;min-width:40px;padding:6px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer}
 .cm.big{font-size:2rem;line-height:1.2;padding:4px 12px}
-.quick{display:flex;gap:4px;padding:8px 12px 0;justify-content:space-between}
-.quick button{flex:1;min-height:40px;font-size:1.3rem;line-height:1;padding:4px 0;border-radius:10px;border:1px solid var(--line);background:var(--bg);cursor:pointer}
-.quick button:active{transform:scale(.92)}
-.floaty{position:fixed;bottom:18%;z-index:60;font-size:2.6rem;pointer-events:none;animation:floatup 2.2s ease-out forwards;text-shadow:0 2px 8px rgba(0,0,0,.35)}
-.floaty small{display:block;font-size:.7rem;font-weight:800;text-align:center;color:var(--text);text-shadow:none;opacity:.85}
-@keyframes floatup{0%{transform:translateY(0) scale(.6);opacity:0}12%{opacity:1;transform:translateY(-20px) scale(1.15)}100%{transform:translateY(-38vh) scale(1);opacity:0}}
-@media (prefers-reduced-motion:reduce){.floaty{animation:none;opacity:.95;bottom:30%}}
+.cm{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:pan-y}
+.cm.held{outline:2px solid var(--accent);outline-offset:1px}
+.rxpop{position:fixed;z-index:70;display:flex;gap:2px;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:99px;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:popin .12s ease-out}
+.rxpop[hidden]{display:none}
+.rxpop button{font-size:1.5rem;line-height:1;min-height:0;min-width:40px;height:40px;padding:0;border:0;border-radius:99px;background:transparent;cursor:pointer}
+.rxpop button:active,.rxpop button.mine{background:var(--bg)}
+@keyframes popin{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
 .chat-form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
 .chat-form input{flex:1;min-width:0}
 .chat-form button{min-height:48px}
@@ -329,10 +326,10 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
     <button type="submit" class="primary">Save name</button>
   </form>
 </div>
+<div class="rxpop" id="rxpop" role="menu" aria-label="React to message" hidden></div>
 <div class="chat" id="chat" role="dialog" aria-label="Family chat" hidden>
   <div class="chat-head"><strong>Family chat</strong><button type="button" id="chatclose">Close</button></div>
   <div class="chat-list" id="chatlist" aria-live="polite"></div>
-  <div class="quick" id="quick" aria-label="Quick reactions"></div>
   <form class="chat-form" id="chatform" autocomplete="off">
     <input type="text" id="chatinp" maxlength="200" placeholder="Say something…" enterkeyhint="send" aria-label="Chat message">
     <button type="submit" class="primary">Send</button>
@@ -412,7 +409,6 @@ function sendWords(){send({t:'words',words:S.myWords});}
 const chat={open:false,unread:0,seen:new Set()};
 const REACTS=['\u{1F44D}','\u2764\uFE0F','\u{1F602}','\u{1F389}','\u{1F62E}','\u{1F44F}','\u{1F622}','\u{1F525}'];
 const chatMsgs=new Map();
-function isEmojiOnly(t){return REACTS.includes(t);}
 function rxDraw(id){
   const o=chatMsgs.get(id);if(!o)return;const box=o.el.querySelector('.rxs');box.textContent='';
   const rx=o.msg.rx||{};
@@ -421,35 +417,52 @@ function rxDraw(id){
     b.addEventListener('click',ev=>{ev.stopPropagation();send({t:'react',id,emoji:e});});
     box.append(b);});
 }
-function floatEmoji(e,who){
-  const f=h('div',{class:'floaty'},document.createTextNode(e),h('small',{text:who||''}));
-  f.style.left=(12+Math.random()*70)+'%';document.body.append(f);setTimeout(()=>f.remove(),2400);
+let rxTarget=null;
+function rxClose(){const p=$('#rxpop');p.hidden=true;if(rxTarget){rxTarget.el.classList.remove('held');rxTarget=null;}}
+function rxOpen(id){
+  const o=chatMsgs.get(id);if(!o)return;rxClose();rxTarget=o;
+  const pop=$('#rxpop');pop.textContent='';
+  const mineSet=new Set(REACTS.filter(e=>(o.msg.rx&&o.msg.rx[e]||[]).includes(S.meId)));
+  REACTS.forEach(e=>{const b=h('button',{type:'button',text:e,role:'menuitem','aria-label':'React '+e,class:mineSet.has(e)?'mine':''});
+    b.addEventListener('click',ev=>{ev.stopPropagation();send({t:'react',id,emoji:e});rxClose();});pop.append(b);});
+  o.el.classList.add('held');pop.hidden=false;
+  const r=o.el.getBoundingClientRect(),pw=pop.offsetWidth,ph=pop.offsetHeight;
+  let left=Math.min(Math.max(8,r.left+(r.width-pw)/2),innerWidth-pw-8);
+  const lt=$('#chatlist').getBoundingClientRect().top;let top=r.top-ph-8;if(top<lt+2)top=r.bottom+8;
+  pop.style.left=left+'px';pop.style.top=top+'px';
+  try{if(navigator.vibrate)navigator.vibrate(12);}catch(e){}
 }
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('#rxpop'))rxClose();},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')rxClose();});
+$('#chatlist').addEventListener('scroll',rxClose);
 function chatRender(msg,fresh){
   const list=$('#chatlist');const em=list.querySelector('.chat-empty');if(em)em.remove();
   if(chat.seen.has(msg.id))return;chat.seen.add(msg.id);
   const mine=msg.pid===S.meId;
   const near=list.scrollHeight-list.scrollTop-list.clientHeight<80;
-  const big=isEmojiOnly(msg.text);
-  const pick=h('div',{class:'rxpick'});
-  REACTS.forEach(e=>{const b=h('button',{type:'button',text:e,'aria-label':'React '+e});b.addEventListener('click',ev=>{ev.stopPropagation();send({t:'react',id:msg.id,emoji:e});el.classList.remove('pick');});pick.append(b);});
-  const el=h('div',{class:'cm'+(mine?' me':'')+(big?' big':'')},mine?null:h('span',{class:'cm-who',text:msg.name}),document.createTextNode(msg.text),h('div',{class:'rxs'}),pick);
-  el.addEventListener('click',()=>{if(String(msg.id).startsWith('local'))return;el.classList.toggle('pick');});
+  const el=h('div',{class:'cm'+(mine?' me':'')},mine?null:h('span',{class:'cm-who',text:msg.name}),document.createTextNode(msg.text),h('div',{class:'rxs'}));
+  if(!String(msg.id).startsWith('local')){
+    let t=null,sx=0,sy=0;
+    const stop=()=>{if(t){clearTimeout(t);t=null;}};
+    el.addEventListener('pointerdown',e=>{if(e.button>0)return;sx=e.clientX;sy=e.clientY;stop();t=setTimeout(()=>{t=null;rxOpen(msg.id);},450);});
+    el.addEventListener('pointermove',e=>{if(t&&(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10))stop();});
+    ['pointerup','pointercancel','pointerleave'].forEach(n=>el.addEventListener(n,stop));
+    el.addEventListener('contextmenu',e=>{e.preventDefault();stop();rxOpen(msg.id);});
+  }
   list.append(el);chatMsgs.set(msg.id,{el,msg});rxDraw(msg.id);
-  while(list.children.length>100){const f=list.firstChild;f.remove();}
+  while(list.children.length>100){list.firstChild.remove();}
   if(near||mine||!chat.open)list.scrollTop=list.scrollHeight;
-  if(fresh&&big&&!mine)floatEmoji(msg.text,msg.name);
   if(fresh&&!mine&&!chat.open){chat.unread++;chatBadge();sfx.pop();}
 }
 function chatReact(id,rx){const o=chatMsgs.get(id);if(!o)return;o.msg.rx=rx;rxDraw(id);}
-(function(){const q=$('#quick');REACTS.forEach(e=>{const b=h('button',{type:'button',text:e,'aria-label':'Send '+e});b.addEventListener('click',()=>{if(!S.name){return;}send({t:'chat',text:e});floatEmoji(e,'');});q.append(b);});})();
 function chatBadge(){const b=$('#chatbadge');b.hidden=chat.unread===0;b.textContent=chat.unread>9?'9+':String(chat.unread);$('#chatbtn').setAttribute('aria-label',chat.unread?('Open chat, '+chat.unread+' new'):'Open chat');}
 function chatSet(open){
+  rxClose();
   if(open&&!$('#settings').hidden)$('#settings').hidden=true;
   chat.open=open;$('#chat').hidden=!open;
   if(open){chat.unread=0;chatBadge();const l=$('#chatlist');l.scrollTop=l.scrollHeight;setTimeout(()=>{try{$('#chatinp').focus();}catch(e){}},50);}
 }
-function chatEmpty(){const l=$('#chatlist');if(!l.children.length)l.append(h('p',{class:'chat-empty',text:'No messages yet. Say hi!'}));}
+function chatEmpty(){const l=$('#chatlist');if(!l.children.length)l.append(h('p',{class:'chat-empty',text:'No messages yet. Say hi! Press and hold a message to react.'}));}
 chatEmpty();
 $('#chatbtn').addEventListener('click',()=>chatSet(!chat.open));
 $('#chatclose').addEventListener('click',()=>chatSet(false));

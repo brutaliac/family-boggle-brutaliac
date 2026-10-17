@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="boggle-build" content="20261016-5">
+<meta name="boggle-build" content="20261016-6">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1d3b4f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -174,7 +174,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 .chat-form input{flex:1;min-width:0}
 .chat-form button{min-height:48px}
 .entry{display:flex;gap:10px}
-.entry input{flex:1 1 auto;font-family:var(--font-display);font-weight:800;font-size:1.5rem;letter-spacing:.08em;text-transform:uppercase;text-align:center}
+.entry input{flex:1 1 auto;min-width:0;min-height:60px;font-family:var(--font-display);font-weight:800;font-size:1.5rem;letter-spacing:.08em;text-transform:uppercase;text-align:center}
 .entry button{flex:0 0 auto}
 .entry.shake{animation:shake .3s}
 @keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
@@ -208,13 +208,14 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 .boardwrap{gap:8px}
 .board{width:min(100%,max(240px,calc(100vh - 215px)));margin-inline:auto}
 .board{width:min(100%,max(240px,calc(100dvh - 215px)))}
+@media(max-width:759px){.board{width:100%;flex-shrink:0}}
 .msg{height:1.4em;min-height:0;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top{flex-wrap:nowrap}
 .top h1{font-size:1.25rem;white-space:nowrap}
 .top-r{min-width:0}
 .pill{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .entry input::placeholder{font-size:1rem;letter-spacing:.02em;text-transform:none;font-weight:700}
-@media (orientation:landscape) and (max-height:520px){
+@media (min-width:760px) and (orientation:landscape) and (max-height:520px){
   #v-play:not([hidden]){display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:14px;row-gap:8px;align-items:start}
   #v-play .stage,#v-play .boardwrap{display:contents}
   #v-play .board{grid-column:1;grid-row:1 / span 4}
@@ -226,12 +227,50 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 }
 @media (prefers-reduced-motion:reduce){.entry.shake,.die.on{animation:none}.bar>i,.die{transition:none}}
 /* Voice controls stay available throughout the game. */
-.voice-panel{padding:14px 18px;gap:10px}
-.voice-heading,.voice-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.voice-heading{justify-content:space-between}
-#voice-people{list-style:none;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap;font-size:.85rem}
-#voice-people li{padding:4px 9px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere;max-width:100%}
-#voice-mute[aria-pressed="true"]{border-color:var(--bad);color:var(--bad)}
+.voice-panel{padding:10px 14px;gap:8px}
+.voice-bar,.voice-heading,.voice-controls{display:flex;align-items:center;gap:8px}
+.voice-bar{justify-content:space-between;flex-wrap:wrap}
+.voice-heading{gap:10px;min-width:0}
+.voice-members{position:relative;border:0;padding:0;margin:0;align-self:center}
+.voice-members summary{display:flex;align-items:center;gap:7px;list-style:none;cursor:pointer;padding:7px 10px;border-radius:999px;font-size:.78rem;color:var(--muted);white-space:nowrap;transition:background .15s}
+.voice-members summary:hover{background:var(--bg)}
+.voice-avatars{display:grid;grid-template-columns:repeat(var(--voice-columns,1),26px);grid-auto-rows:36px;gap:5px 0;align-items:center;padding-right:10px}
+.voice-avatar{position:relative;display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border:2px solid var(--surface);border-radius:50%;background:var(--avatar-bg,#d7e4e4);color:#20323b;font:700 12px var(--font-body);letter-spacing:.02em;box-shadow:0 0 0 1px var(--line)}
+.voice-avatar+.voice-avatar{margin-left:0}
+.voice-avatar::after{content:'';position:absolute;right:-1px;bottom:-1px;width:7px;height:7px;border:1.5px solid var(--surface);border-radius:50%;background:var(--good)}
+.voice-avatar.is-muted::after{background:var(--muted)}
+.voice-members summary::-webkit-details-marker{display:none}
+.voice-members summary::after{content:'';width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg)}
+.voice-members[open] summary::after{transform:translateY(1px) rotate(225deg)}
+.voice-members summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#voice-people{position:absolute;z-index:20;top:calc(100% + 10px);left:0;width:180px;max-width:calc(100vw - 64px);list-style:none;padding:8px;margin:0;display:flex;flex-direction:column;gap:2px;font-size:.85rem;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #0002}
+#voice-people:empty::after{content:'No one in voice yet';padding:6px 8px;color:var(--muted)}
+#voice-people li{padding:5px 6px;display:flex;align-items:center;gap:6px;overflow-wrap:anywhere}
+.voice-person-name{flex:1;min-width:0}
+.voice-person-status{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted)}
+.voice-person-status.is-connected{color:var(--good)}
+.voice-person-status.is-muted,.voice-person-status.is-failed{color:var(--bad)}
+.voice-person-status.is-pending svg{animation:voice-connecting 1.2s linear infinite}
+@keyframes voice-connecting{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.voice-person-status.is-pending svg{animation:none}}
+.voice-controls{gap:12px;flex-wrap:wrap;margin-left:auto}
+.voice-controls button{min-height:36px;padding:6px 10px;font-size:.82rem;border-radius:8px}
+#voice-join{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,var(--line));background:color-mix(in srgb,var(--good) 10%,var(--surface));border-radius:8px}
+#voice-join:hover{background:color-mix(in srgb,var(--good) 18%,var(--surface));border-color:var(--good)}
+#voice-leave{color:var(--muted);background:transparent}
+#voice-status{font-size:.8rem}
+.voice-controls #voice-mute,.voice-controls #voice-leave{display:grid;place-items:center;width:42px;height:42px;min-width:42px;padding:0;border-radius:50%;flex-shrink:0}
+#voice-mute svg,#voice-leave svg{width:22px;height:22px}
+#voice-mute{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,var(--line));background:color-mix(in srgb,var(--good) 10%,var(--surface))}
+#voice-mute[aria-pressed="true"]{border-color:color-mix(in srgb,var(--bad) 40%,var(--line));color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--surface))}
+#voice-mute .mic-slash{display:none}
+#voice-mute[aria-pressed="true"] .mic-slash{display:block}
+#voice-mute[data-speaking="true"]{animation:voice-pulse .85s ease-in-out infinite}
+#voice-leave:hover{color:var(--bad);border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--surface))}
+@keyframes voice-pulse{0%,100%{box-shadow:0 0 0 2px color-mix(in srgb,var(--good) 12%,transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--good) 22%,transparent)}}
+@media(prefers-reduced-motion:reduce){#voice-mute[data-speaking="true"]{animation:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 30%,transparent)}}
+@media(max-width:520px){.voice-heading{gap:8px}.voice-avatars{grid-template-columns:repeat(var(--voice-columns,1),24px);grid-auto-rows:32px;padding-right:8px}.voice-avatar{width:32px;height:32px;font-size:11px}}
+@media(max-width:380px){.voice-panel{padding:9px 10px}.voice-heading{gap:6px}.voice-controls button{padding:6px 8px}.voice-bar{gap:6px}}
 </style>
 </head>
 <body>
@@ -259,16 +298,19 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
   </header>
   <div class="herepop" id="herepop" role="status" hidden></div>
 
-  <section class="panel voice-panel" aria-labelledby="voice-title">
-    <div class="voice-heading"><h3 id="voice-title">Room voice</h3><span id="voice-count" class="small muted"></span></div>
-    <p id="voice-status" class="small muted" role="status" aria-live="polite"></p>
+  <section class="panel voice-panel" aria-label="Voice chat">
+    <div class="voice-bar">
+    <div class="voice-heading">
+      <details class="voice-members"><summary id="voice-members-toggle" aria-label="People in voice" title="See people in voice"><span id="voice-avatars" class="voice-avatars" aria-hidden="true"></span><span id="voice-count" hidden></span></summary><ul id="voice-people" aria-label="People in voice"></ul></details>
+    </div>
     <div class="voice-controls">
-      <button type="button" id="voice-join">Join voice</button>
-      <button type="button" id="voice-mute" aria-pressed="false" hidden>Mute mic</button>
-      <button type="button" id="voice-leave" hidden>Leave voice</button>
+      <button type="button" id="voice-join">Join Voice</button>
+      <button type="button" id="voice-mute" aria-label="Mute microphone" title="Mute microphone" aria-pressed="false" hidden><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/><path class="mic-slash" d="M3 3l18 18" stroke-width="2.5"/></svg></button>
+      <button type="button" id="voice-leave" aria-label="Leave voice" title="Leave voice" hidden><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H5v16h5M9 12h12m-4-4 4 4-4 4"/></svg></button>
       <button type="button" id="voice-resume" hidden>Enable voice audio</button>
     </div>
-    <ul id="voice-people" aria-label="People in voice"></ul>
+    </div>
+    <p id="voice-status" class="small muted" role="status" aria-live="polite" hidden></p>
     <div id="voice-audio" hidden></div>
   </section>
 
@@ -443,7 +485,7 @@ renderSound();
 const S={ws:null,connected:false,clockOff:0,game:null,list:[],meId:null,myKey:ls('bw-key')||('k'+rid()),name:ls('bw-name')||'',myWords:[],myGid:null,phase:'lobby',builtFor:null,opt:{duration:90,shared:'count'},path:[],notice:''};
 ls('bw-key',S.myKey);
 const voice=createRoomVoice({send,getState:()=>S});
-let board=[];let dice=[],traceEl=null,boardEl=$('#board'),inp=$('#word');
+let board=[],boardRoundId=null;let dice=[],traceEl=null,boardEl=$('#board'),inp=$('#word');
 const ROOM=(new URLSearchParams(location.search).get('room')||'family');
 
 function hostNow(){return Date.now()+S.clockOff;}
@@ -676,7 +718,9 @@ function onState(m){
     let restored=[];try{restored=JSON.parse(ss('bw-words-'+g.id)||'[]');}catch(e){}
     S.myWords=(m.me&&m.me.gid===g.id&&m.me.words.length>=restored.length)?m.me.words.slice():(Array.isArray(restored)?restored:[]);
   }else if(g&&m.me&&m.me.gid===g.id&&m.me.words.length>S.myWords.length){S.myWords=m.me.words.slice();}
-  S.game=g;if(g)board=g.board;
+  // Keep the layout actually played for the entire round, including results.
+  if(g&&g.id!==boardRoundId){board=Object.freeze(g.board.slice());boardRoundId=g.id;}
+  S.game=g?{...g,board}:null;
   update(true);
 }
 
@@ -688,19 +732,46 @@ function startRound(){
 }
 
 /* ---------- board ---------- */
+function boardCell(t){
+  const die=h('div',{class:'die'+(t==='qu'?' qu':''),text:t==='qu'?'Qu':t.toUpperCase()});
+  return h('div',{class:'cell'},die);
+}
 function buildBoard(){
   boardEl.textContent='';dice=[];
-  for(let i=0;i<16;i++){const t=board[i];const d=h('div',{class:'die'+(t==='qu'?' qu':''),text:t==='qu'?'Qu':t.toUpperCase()});dice.push(d);boardEl.append(h('div',{class:'cell'},d));}
+  for(const t of board){const cell=boardCell(t);dice.push(cell.firstChild);boardEl.append(cell);}
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','trace');svg.setAttribute('viewBox','0 0 100 100');
   traceEl=document.createElementNS('http://www.w3.org/2000/svg','polyline');svg.append(traceEl);boardEl.append(svg);
   S.builtFor=S.game.id;S.path=[];inp.value='';drawPath();
 }
 function drawPath(){
+  fitWordText();
   const on=new Set(S.path);dice.forEach((d,i)=>d.classList.toggle('on',on.has(i)));
   if(traceEl)traceEl.setAttribute('points',S.path.map(i=>((i&3)*25+12.5)+','+((i>>2)*25+12.5)).join(' '));
 }
+const wordMeasure=document.createElement('canvas').getContext('2d');
+function fitWordText(){
+  if(!inp.clientWidth)return;
+  inp.style.removeProperty('font-size');
+  const css=getComputedStyle(inp),base=parseFloat(css.fontSize);
+  const available=inp.clientWidth-parseFloat(css.paddingLeft)-parseFloat(css.paddingRight)-4;
+  const text=inp.value.toUpperCase();
+  if(text.length>5&&available>0&&wordMeasure){
+    wordMeasure.font=css.fontStyle+' '+css.fontWeight+' '+base+'px '+css.fontFamily;
+    const spacing=parseFloat(css.letterSpacing)||0;
+    const width=wordMeasure.measureText(text).width+spacing*text.length;
+    if(width>available)inp.style.fontSize=(Math.floor(base*available/width*100)/100)+'px';
+  }
+  inp.scrollLeft=0;
+}
+if(window.ResizeObserver)new ResizeObserver(fitWordText).observe(inp);
+addEventListener('resize',fitWordText);
+if(document.fonts)document.fonts.ready.then(fitWordText);
 function fitBoard(){
   if(!boardEl||$('#v-play').hidden)return;
+  if(window.innerWidth<760){
+    if(boardEl.style.width!=='100%')boardEl.style.width='100%';
+    return;
+  }
   const wrap=boardEl.parentElement;
   const r=boardEl.getBoundingClientRect();
   const docTop=r.top+window.scrollY;
@@ -798,7 +869,7 @@ function roundPlayers(){
   return players().filter(p=>p.gid===g.id).map(p=>({name:p.name,words:p.me?S.myWords:p.words}));
 }
 
-let miniFor=null,miniWord=null,lastMiniGame=null;
+let miniFor=null,miniBoardKey=null,miniWord=null,lastMiniGame=null;
 function findPath(w){
   const B=board,res=[];
   function go(i,pos,used,path){
@@ -813,9 +884,10 @@ function findPath(w){
   return res[0]||null;
 }
 function buildMini(){
-  const m=$('#mini');if(miniFor===S.game.id&&m.children.length===16)return;
-  m.textContent='';miniFor=S.game.id;
-  board.forEach(t=>{const d=h('div',{class:'die'+(t==='qu'?' qu':''),text:t==='qu'?'Qu':t.toUpperCase()});m.append(h('div',{class:'cell'},d));});
+  const m=$('#mini'),key=JSON.stringify(board);
+  if(miniFor===S.game.id&&miniBoardKey===key&&m.children.length===16)return;
+  m.textContent='';miniFor=S.game.id;miniBoardKey=key;
+  board.forEach(t=>m.append(boardCell(t)));
 }
 function showMini(w){
   const m=$('#mini');const path=w?findPath(w):null;miniWord=path?w:null;

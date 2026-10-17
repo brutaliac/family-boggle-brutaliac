@@ -60,6 +60,9 @@ test('a second round replaces the cached review board before scores finish loadi
   assert.equal(s.get('#review-selected').text,'');
   assert.equal(s.get('#review-selected').hidden,true);
   assert.equal(s.get('#review-caption').hidden,true);
+  assert.equal(s.get('#results-start').hidden,true);
+  assert.equal(s.get('#results-start').disabled,true);
+  assert.equal(s.get('#next-box').hidden,true);
   // Scoring messages cannot replace the board actually played.
   s.state('second',first,[]);
   assert.deepEqual(s.letters(s.mini),current);

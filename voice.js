@@ -38,6 +38,11 @@ window.createVoiceActivityMonitor = function (stream, onActivity) {
 };
 // Names are the current room identity; use consistent initials until profile images exist.
 window.renderVoiceAvatars = function (people) {
+  const empty = people.length === 0;
+  const members = document.getElementById('voice-members');
+  const placeholder = document.getElementById('voice-empty');
+  if (members) { members.hidden = empty; if (empty) members.open = false; }
+  if (placeholder) placeholder.hidden = !empty;
   const stack = document.getElementById('voice-avatars');
   stack.replaceChildren();
   stack.setAttribute('style', '--voice-columns:' + Math.max(1, Math.min(5, people.length)));

@@ -78,10 +78,13 @@ You can look at the raw numbers at `/stats.json` (add `?room=name` for another r
 
 ## Room voice chat
 
-The Room voice panel is available in the lobby, during rounds, and on results.
-Enter a name, choose **Join voice**, and allow microphone access. **Mute mic**
-turns off outgoing audio while you keep listening; **Leave voice** stops the
-microphone and closes calls. Joining is always manual, including after a lost
+The compact voice bar is available in the lobby, during rounds, and on results.
+Enter a name, choose **Join Voice**, and allow microphone access. The microphone
+icon is green while on and red while muted; click it to toggle outgoing audio
+while you keep listening. A speech activity pulse uses local microphone levels
+without recording. The exit icon stops the microphone and closes calls.
+Click the avatar stack to see everyone and their connection and microphone status.
+Avatars wrap after five participants. Joining is always manual, including after a lost
 connection. Game sound settings do not mute voice. If the browser blocks incoming
 sound, tap **Enable voice audio**. Headphones help prevent echo.
 

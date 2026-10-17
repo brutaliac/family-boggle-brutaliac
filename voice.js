@@ -1,34 +1,111 @@
 /* Room voice is opt-in. No microphone access until Join is clicked. */
 'use strict';
+window.renderVoiceMic = function (button, muted) {
+  button.setAttribute('aria-pressed', String(muted));
+  button.setAttribute('aria-label', muted ? 'Unmute microphone' : 'Mute microphone');
+  button.title = muted ? 'Unmute microphone' : 'Mute microphone';
+  if (muted) button.setAttribute('data-speaking', 'false');
+};
+// Analyse locally without connecting to speakers or retaining microphone samples.
+window.createVoiceActivityMonitor = function (stream, onActivity) {
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) return () => {};
+  let context, source, timer;
+  const stop = () => {
+    if (timer !== undefined) clearInterval(timer);
+    try { source?.disconnect(); } catch {}
+    if (context) { try { Promise.resolve(context.close()).catch(() => {}); } catch {} }
+    onActivity(false);
+  };
+  try {
+    context = new Context();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source = context.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    let lastActive = 0;
+    const sample = () => {
+      analyser.getFloatTimeDomainData(samples);
+      const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+      if (rms > .025) lastActive = Date.now();
+      onActivity(lastActive > 0 && Date.now() - lastActive < 240);
+    };
+    Promise.resolve(context.resume()).catch(() => {});
+    timer = setInterval(sample, 80);
+    return stop;
+  } catch { stop(); return () => {}; }
+};
+// Names are the current room identity; use consistent initials until profile images exist.
+window.renderVoiceAvatars = function (people) {
+  const stack = document.getElementById('voice-avatars');
+  stack.replaceChildren();
+  stack.setAttribute('style', '--voice-columns:' + Math.max(1, Math.min(5, people.length)));
+  const palette = ['#c9e2d4', '#e6d3ef', '#f2dbb5', '#c6dced', '#eed0cc', '#d7ddba'];
+  for (const person of people) {
+    const avatar = document.createElement('span');
+    const name = String(person.name || 'Player');
+    let hash = 0;
+    for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+    avatar.className = 'voice-avatar' + (person.muted ? ' is-muted' : '');
+    avatar.textContent = name.trim().split(/\s+/u).slice(0, 2).map(word => Array.from(word)[0] || '').join('').toUpperCase();
+    avatar.setAttribute('style', '--avatar-bg:' + palette[hash % palette.length]);
+    avatar.title = name + (person.muted ? ' · muted' : ' · mic on');
+    stack.append(avatar);
+  }
+  document.getElementById('voice-count').textContent = String(people.length);
+  document.getElementById('voice-members-toggle').setAttribute('aria-label', people.length + (people.length === 1 ? ' person' : ' people') + ' in voice. Show participants.');
+};
+window.createVoicePersonRow = function (person, state, self = false) {
+  const item = document.createElement('li');
+  const name = document.createElement('span');
+  name.className = 'voice-person-name';
+  name.textContent = String(person.name || 'Player') + (self ? ' (you)' : '');
+  item.append(name);
+  const icon = (label, kind, paths) => {
+    const node = document.createElement('span');
+    node.className = 'voice-person-status ' + kind;
+    node.title = label;
+    node.setAttribute('role', 'img');
+    node.setAttribute('aria-label', label);
+    node.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+    item.append(node);
+  };
+  if (state === 'connected') icon('Connected', 'is-connected', '<path d="M3 8.5a14 14 0 0 1 18 0M6 12a9 9 0 0 1 12 0M9 15.5a4.5 4.5 0 0 1 6 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>');
+  else if (state === 'in voice') icon('In voice', '', '<path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/>');
+  else if (state.startsWith('connection failed')) icon('Connection failed. Leave and rejoin to retry.', 'is-failed', '<path d="m12 3 10 18H2L12 3ZM12 9v5M12 17v.1"/>');
+  else icon('Connecting', 'is-pending', '<circle cx="12" cy="12" r="8" stroke-dasharray="30 20"/>');
+  icon(person.muted ? 'Microphone muted' : 'Microphone on', person.muted ? 'is-muted' : 'is-connected', '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/>' + (person.muted ? '<path d="M3 3l18 18" stroke-width="2.5"/>' : ''));
+  return item;
+};
 window.createRoomVoice = function ({ send, getState }) {
   const $ = id => document.getElementById(id);
   const peers = new Map();
   let roster = [], stream = null, session = null, iceServers = [], muted = false;
   let busy = false, generation = 0, notice = '', joinTimer = null;
+  let stopActivity = () => {};
 
   function render() {
     const joined = !!session;
     $('voice-join').hidden = joined;
     $('voice-join').disabled = busy;
-    $('voice-join').textContent = busy ? 'Joining…' : 'Join voice';
+    $('voice-join').textContent = busy ? 'Joining…' : 'Join Voice';
     $('voice-mute').hidden = !joined;
-    $('voice-mute').textContent = muted ? 'Unmute mic' : 'Mute mic';
-    $('voice-mute').setAttribute('aria-pressed', String(muted));
+    window.renderVoiceMic($('voice-mute'), muted);
+    if (!joined) $('voice-mute').setAttribute('data-speaking', 'false');
     $('voice-leave').hidden = !joined && !busy;
-    $('voice-status').textContent = notice || (joined ? (muted ? 'Your microphone is muted.' : 'Your microphone is on.') :
-      'Talk with people in this room. Your mic stays off until you join.');
+    $('voice-status').textContent = notice;
+    $('voice-status').hidden = !$('voice-status').textContent;
     const list = $('voice-people');
     list.replaceChildren();
     for (const p of roster) {
-      const item = document.createElement('li');
       const self = p.id === getState().meId;
       const peer = peers.get(p.id);
-      const state = self ? 'you' : !joined ? 'in voice' : peer?.pc.connectionState === 'connected' ? 'connected' :
+      const state = self ? 'connected' : !joined ? 'in voice' : peer?.pc.connectionState === 'connected' ? 'connected' :
         peer?.pc.connectionState === 'failed' ? 'connection failed — leave and rejoin' : 'connecting';
-      item.textContent = p.name + ' · ' + state + (p.muted ? ' · mic muted' : '');
-      list.append(item);
+      list.append(window.createVoicePersonRow(p, state, self));
     }
-    $('voice-count').textContent = roster.length ? roster.length + '/8 in voice' : 'No one in voice yet';
+    window.renderVoiceAvatars(roster);
     $('voice-resume').hidden = ![...peers.values()].some(p => p.blocked);
   }
 
@@ -45,6 +122,7 @@ window.createRoomVoice = function ({ send, getState }) {
     generation++; clearTimeout(joinTimer);
     if (notify && (stream || session)) send({ t: 'voice-leave' });
     session = null; busy = false;
+    stopActivity(); stopActivity = () => {};
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = null;
     for (const id of [...peers.keys()]) closePeer(id);
@@ -120,6 +198,9 @@ window.createRoomVoice = function ({ send, getState }) {
       if (attempt !== generation) { mic.getTracks().forEach(t => t.stop()); return; }
       if (!getState().connected) { mic.getTracks().forEach(t => t.stop()); leave('Connection lost. Join voice again once connected.'); return; }
       stream = mic; muted = false;
+      stopActivity = window.createVoiceActivityMonitor(mic, speaking => {
+        $('voice-mute').setAttribute('data-speaking', String(!!session && !muted && speaking));
+      });
       mic.getAudioTracks().forEach(t => { t.onended = () => leave('Microphone disconnected. Join again to retry.'); });
       send({ t: 'voice-join', muted });
       joinTimer = setTimeout(() => leave('Could not join voice. Please try again.'), 10000);

@@ -7,8 +7,8 @@ const path = require('node:path');
 
 function setup(getMic) {
   const elements = new Map();
-  const element = () => ({ hidden: false, children: [], handlers: {}, textContent: '',
-    addEventListener(k, fn) { this.handlers[k] = fn; }, setAttribute() {},
+  const element = () => ({ hidden: false, children: [], handlers: {}, attributes: {}, textContent: '',
+    addEventListener(k, fn) { this.handlers[k] = fn; }, setAttribute(k, v) { this.attributes[k] = v; },
     replaceChildren() { this.children = []; }, append(x) { this.children.push(x); },
     pause() {}, remove() { this.removed = true; }, async play() {},
   });
@@ -37,9 +37,36 @@ function setup(getMic) {
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'voice.js'), 'utf8'), ctx);
   const voice = ctx.window.createRoomVoice({ send: m => sent.push(m), getState: () => state });
-  return { voice, sent, tracks, pcs, elements, state, click: id => elements.get(id).handlers.click() };
+  return { voice, sent, tracks, pcs, elements, state, ctx, click: id => elements.get(id).handlers.click() };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('microphone activity responds to audio, stays off while muted, and releases the analyser on leave', async () => {
+  const s = setup();
+  let sample, amplitude = 0, now = 1000, disconnected = false, closed = false, cleared = false;
+  s.ctx.Date = { now: () => now };
+  s.ctx.setInterval = fn => { sample = fn; return 42; };
+  s.ctx.clearInterval = id => { cleared = id === 42; };
+  s.ctx.window.AudioContext = class {
+    createAnalyser() { return { fftSize:512, getFloatTimeDomainData(data) { data.fill(amplitude); } }; }
+    createMediaStreamSource() { return { connect() {}, disconnect() { disconnected = true; } }; }
+    resume() { return Promise.resolve(); }
+    close() { closed = true; return Promise.resolve(); }
+  };
+  await s.click('voice-join');
+  s.voice.message({ t:'voice-ready', session:'local', iceServers:[] });
+  const mic = s.elements.get('voice-mute');
+  sample(); assert.equal(mic.attributes['data-speaking'], 'false');
+  amplitude = .08; sample(); assert.equal(mic.attributes['data-speaking'], 'true');
+  await s.click('voice-mute');
+  sample(); assert.equal(mic.attributes['data-speaking'], 'false');
+  assert.equal(mic.attributes['aria-label'], 'Unmute microphone');
+  await s.click('voice-mute');
+  amplitude = 0; now += 500; sample(); assert.equal(mic.attributes['data-speaking'], 'false');
+  await s.click('voice-leave');
+  assert.ok(disconnected && closed && cleared);
+  assert.equal(mic.attributes['data-speaking'], 'false');
+});
 
 test('browser voice joins only on click, queues ICE, mutes tracks, and cleans up on disconnect', async () => {
   const s = setup();

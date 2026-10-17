@@ -5,6 +5,25 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+test('active rounds block pinch and double-click zoom while allowing ordinary scrolling', () => {
+  const start = html.indexOf('function preventPlayZoom(e){');
+  const ctx = { S:{ phase:'play' } };
+  vm.createContext(ctx);
+  vm.runInContext(html.slice(start, html.indexOf("\n['gesturestart'", start)), ctx);
+  function blocked(type, extra = {}) {
+    let prevented = false;
+    ctx.preventPlayZoom({ type, cancelable:true, preventDefault() { prevented = true; }, ...extra });
+    return prevented;
+  }
+  assert.equal(blocked('touchstart', { touches:[{}, {}] }), true);
+  assert.equal(blocked('gesturestart'), true);
+  assert.equal(blocked('dblclick'), true);
+  assert.equal(blocked('wheel', { ctrlKey:true }), true);
+  assert.equal(blocked('touchmove', { touches:[{}] }), false);
+  assert.equal(blocked('wheel'), false);
+  ctx.S.phase = 'lobby';
+  assert.equal(blocked('touchstart', { touches:[{}, {}] }), false);
+});
 function functionSource(name, end) {
   const start = html.indexOf('function ' + name + '(){');
   return html.slice(start, html.indexOf(end, start));

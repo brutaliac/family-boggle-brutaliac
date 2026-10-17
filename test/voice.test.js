@@ -103,7 +103,12 @@ test('room voice signaling lifecycle and isolation', async t => {
   const ninth = await client('capacity', 'Ninth');
   ninth.send({ t: 'voice-join' });
   assert.match((await ninth.next('voice-error')).message, /full/);
-  const js = await fetch(`http://127.0.0.1:${port}/voice.js`);
+  const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+  const build = /name="boggle-build" content="([0-9-]+)"/.exec(page)[1];
+  const script = /<script src="(\/voice\.js[^"]*)"/.exec(page)[1];
+  assert.equal(script, '/voice.js?v=' + build);
+  const js = await fetch(`http://127.0.0.1:${port}${script}`);
   assert.equal(js.status, 200);
   assert.match(js.headers.get('content-type'), /javascript/);
+  assert.match(await js.text(), /window\.renderVoiceAvatars/);
 });

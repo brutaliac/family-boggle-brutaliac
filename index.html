@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="boggle-build" content="20261016-7">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#1d3b4f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -173,6 +173,7 @@ button.pill{min-height:0;font-weight:600;cursor:pointer;border:1px solid var(--l
 .chat-form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
 .chat-form input{flex:1;min-width:0}
 .chat-form button{min-height:48px}
+#v-play{touch-action:pan-x pan-y}
 .entry{display:flex;gap:10px}
 .entry input{flex:1 1 auto;min-width:0;min-height:60px;font-family:var(--font-display);font-weight:800;font-size:1.5rem;letter-spacing:.08em;text-transform:uppercase;text-align:center}
 .entry button{flex:0 0 auto}
@@ -766,6 +767,14 @@ function fitWordText(){
 if(window.ResizeObserver)new ResizeObserver(fitWordText).observe(inp);
 addEventListener('resize',fitWordText);
 if(document.fonts)document.fonts.ready.then(fitWordText);
+// Keep rapid taps and multitouch from changing zoom during an active round.
+function preventPlayZoom(e){
+  const zoom=e.type.startsWith('gesture')||e.type==='dblclick'||
+    ((e.touches?.length||0)>1)||(e.type==='wheel'&&e.ctrlKey);
+  if(S.phase==='play'&&zoom&&e.cancelable)e.preventDefault();
+}
+['gesturestart','gesturechange','touchstart','touchmove','dblclick','wheel'].forEach(type=>
+  document.addEventListener(type,preventPlayZoom,{passive:false}));
 function fitBoard(){
   if(!boardEl||$('#v-play').hidden)return;
   if(window.innerWidth<760){
@@ -790,7 +799,7 @@ function adj(a,b){return NB[a].includes(b);}
 function hit(e,inner){const r=boardEl.getBoundingClientRect();const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;if(x<0||y<0||x>=1||y>=1)return -1;const c=Math.floor(x*4),rr=Math.floor(y*4);if(Math.hypot(x*4-c-.5,y*4-rr-.5)>inner)return -1;return rr*4+c;}
 let dragging=false,moved=false;
 boardEl.addEventListener('pointerdown',e=>{
-  if(S.phase!=='play')return;const i=hit(e,.8);if(i<0)return;
+  if(S.phase!=='play'||e.isPrimary===false)return;const i=hit(e,.8);if(i<0)return;
   try{boardEl.setPointerCapture(e.pointerId);}catch(_){}
   dragging=true;moved=false;const p=S.path,last=p[p.length-1];
   if(p.length&&last===i)p.pop();
@@ -799,7 +808,7 @@ boardEl.addEventListener('pointerdown',e=>{
   inp.value=pathWord().toUpperCase();drawPath();setMsg('');
 });
 boardEl.addEventListener('pointermove',e=>{
-  if(!dragging||S.phase!=='play')return;const i=hit(e,.42);if(i<0)return;const p=S.path,last=p[p.length-1];
+  if(!dragging||S.phase!=='play'||e.isPrimary===false)return;const i=hit(e,.42);if(i<0)return;const p=S.path,last=p[p.length-1];
   if(i===last)return;
   if(p.length>1&&p[p.length-2]===i){p.pop();moved=true;}
   else if(!p.includes(i)&&adj(last,i)){p.push(i);moved=true;buzz();}

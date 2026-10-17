@@ -37,6 +37,19 @@ window.createVoiceActivityMonitor = function (stream, onActivity) {
   } catch { stop(); return () => {}; }
 };
 // Names are the current room identity; use consistent initials until profile images exist.
+// One placeholder style keeps a person's preview consistent across both menus and the stack.
+window.createProfilePreview = function (person) {
+  const avatar = document.createElement('span');
+  const name = String(person.name || 'Player');
+  const palette = ['#c9e2d4', '#e6d3ef', '#f2dbb5', '#c6dced', '#eed0cc', '#d7ddba'];
+  let hash = 0;
+  for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  avatar.className = 'profile-preview';
+  avatar.textContent = name.trim().split(/\s+/u).slice(0, 2).map(word => Array.from(word)[0] || '').join('').toUpperCase();
+  avatar.setAttribute('style', '--avatar-bg:' + palette[hash % palette.length]);
+  avatar.setAttribute('aria-hidden', 'true');
+  return avatar;
+};
 window.renderVoiceAvatars = function (people) {
   const empty = people.length === 0;
   const members = document.getElementById('voice-members');
@@ -46,15 +59,10 @@ window.renderVoiceAvatars = function (people) {
   const stack = document.getElementById('voice-avatars');
   stack.replaceChildren();
   stack.setAttribute('style', '--voice-columns:' + Math.max(1, Math.min(5, people.length)));
-  const palette = ['#c9e2d4', '#e6d3ef', '#f2dbb5', '#c6dced', '#eed0cc', '#d7ddba'];
   for (const person of people) {
-    const avatar = document.createElement('span');
+    const avatar = window.createProfilePreview(person);
     const name = String(person.name || 'Player');
-    let hash = 0;
-    for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
     avatar.className = 'voice-avatar' + (person.muted ? ' is-muted' : '');
-    avatar.textContent = name.trim().split(/\s+/u).slice(0, 2).map(word => Array.from(word)[0] || '').join('').toUpperCase();
-    avatar.setAttribute('style', '--avatar-bg:' + palette[hash % palette.length]);
     avatar.title = name + (person.muted ? ' · muted' : ' · mic on');
     stack.append(avatar);
   }
@@ -66,7 +74,7 @@ window.createVoicePersonRow = function (person, state, self = false) {
   const name = document.createElement('span');
   name.className = 'voice-person-name';
   name.textContent = String(person.name || 'Player') + (self ? ' (you)' : '');
-  item.append(name);
+  item.append(window.createProfilePreview(person), name);
   const icon = (label, kind, paths) => {
     const node = document.createElement('span');
     node.className = 'voice-person-status ' + kind;

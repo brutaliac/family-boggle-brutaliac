@@ -330,11 +330,12 @@ function recordRound(r, g, inRound, totals, winners) {
   for (const p of inRound) {
     const valid = validWordList(g.board, p.words);
     if (!valid.length && !p.ws) continue; // someone who left a tab open and never played does not get a game
-    const key = nameKey(p.name);
+    const originalKey = nameKey(p.name);
+    const key = (room.aliases && Object.hasOwn(room.aliases, originalKey) && room.aliases[originalKey]) || originalKey;
     if (!key) continue;
     if (!room.players[key] && Object.keys(room.players).length >= 200) continue;
     const e = (room.players[key] = room.players[key] || { name: p.name, games: 0, wins: 0, points: 0, words: 0, bestScore: 0, mostWords: 0, longestWord: "", bestStreak: 0 });
-    e.name = p.name; e.games++; e.points += totals.get(p); e.words += valid.length; e.last = now;
+    if (key === originalKey) e.name = p.name; e.games++; e.points += totals.get(p); e.words += valid.length; e.last = now;
     if (winners.has(p)) e.wins++;
     const sc = totals.get(p);
     if (sc > e.bestScore) { e.bestScore = sc; e.bestScoreAt = now; if (sc > prev.score && (!best.score || sc > best.score.v)) best.score = { n: p.name, v: sc }; }
@@ -563,6 +564,8 @@ function load(name, type) {
 load("index.html", "text/html; charset=utf-8");
 load("manifest.webmanifest", "application/manifest+json");
 load("icon.png", "image/png");
+load("admin.html", "text/html; charset=utf-8");
+load("admin.js", "text/javascript; charset=utf-8");
 load("voice.js", "text/javascript; charset=utf-8");
 load("sudoku.html", "text/html; charset=utf-8");
 load("sudoku.css", "text/css; charset=utf-8");
@@ -570,8 +573,55 @@ load("sudoku-engine.js", "text/javascript; charset=utf-8");
 load("sudoku.js", "text/javascript; charset=utf-8");
 files["/"] = files["/index.html"];
 
-const server = http.createServer((req, res) => {
+
+// Admin credentials are sent only in an Authorization header and never stored by the page.
+const ADMIN_PASSWORD = process.env.BOGGLE_ADMIN_PASSWORD || "";
+const adminDigest = s => crypto.createHash("sha256").update(s).digest();
+async function handleAdmin(req, res, url) {
+  const reply = (code, body) => { res.writeHead(code, {"content-type":"application/json", "cache-control":"no-store", "x-content-type-options":"nosniff"}); res.end(JSON.stringify(body)); };
+  if (!ADMIN_PASSWORD) return reply(503, {error:"Set BOGGLE_ADMIN_PASSWORD on the server to enable admin access."});
+  const supplied = (req.headers.authorization || "").replace(/^Bearer /, "");
+  if (!crypto.timingSafeEqual(adminDigest(supplied), adminDigest(ADMIN_PASSWORD))) return reply(401, {error:"Incorrect admin password."});
+  if (url.pathname === "/api/admin/players" && req.method === "GET") {
+    return reply(200, {updatedAt:stats.updatedAt, rooms:Object.entries(stats.rooms).map(([name, room]) => ({name, players:Object.entries(room.players).map(([key, p]) => ({...p,key}))}))});
+  }
+  if (url.pathname !== "/api/admin/merge" || req.method !== "POST") return reply(404, {error:"Not found."});
+  try {
+    let body = "";
+    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) return reply(413, {error:"Request too large."}); }
+    const m = JSON.parse(body), room = stats.rooms[m.room];
+    if (!room || typeof m.source !== "string" || typeof m.target !== "string" || m.source === m.target || !Object.hasOwn(room.players,m.source) || !Object.hasOwn(room.players,m.target)) return reply(400,{error:"Select two different existing players in the same room."});
+    if (m.updatedAt !== stats.updatedAt) return reply(409,{error:"Stats changed. Refresh and review the preview again."});
+    const live = rooms.get(m.room);
+    if (live && live.game && !live.game.results && phaseOf(live) === "done") { finalize(live, live.game); return reply(409,{error:"Round results were saved. Refresh and review the preview again."}); }
+    if (live && ["count","play"].includes(phaseOf(live))) return reply(409,{error:"Wait for the current round to finish before merging."});
+    const next = JSON.parse(JSON.stringify(stats)), r = next.rooms[m.room];
+    const a = r.players[m.source], b = r.players[m.target];
+    r.mergeHistory = r.mergeHistory || [];
+    r.mergeHistory.push({at:Date.now(),sourceKey:m.source,targetKey:m.target,source:{...a},target:{...b},aliases:{...r.aliases}});
+    for (const field of ["games","wins","points","words"]) b[field] = (Number(a[field])||0)+(Number(b[field])||0);
+    if ((a.bestScore||0) > (b.bestScore||0)) { b.bestScore=a.bestScore; b.bestScoreAt=a.bestScoreAt; }
+    for (const field of ["mostWords","bestStreak","last"]) b[field]=Math.max(a[field]||0,b[field]||0);
+    if ((a.longestWord||"").length > (b.longestWord||"").length) b.longestWord=a.longestWord;
+    delete r.players[m.source];
+    r.aliases = r.aliases || {};
+    for (const key of Object.keys(r.aliases)) if (r.aliases[key] === m.source) r.aliases[key]=m.target;
+    r.aliases[m.source]=m.target;
+    next.updatedAt=Math.max(Date.now(),stats.updatedAt+1);
+    // Persist before publishing: a failed write leaves the original stats untouched.
+    fs.mkdirSync(DATA_DIR,{recursive:true});
+    fs.writeFileSync(STATS_FILE+".tmp",JSON.stringify(next));
+    fs.renameSync(STATS_FILE+".tmp",STATS_FILE);
+    stats=next; scheduleBackup();
+    if (live) broadcastRaw(live,{t:"stats",stats:boardFor(m.room)});
+    return reply(200,{ok:true,name:b.name});
+  } catch(e) { return reply(400,{error:e instanceof SyntaxError ? "Invalid request." : "Merge could not be saved. Original records were kept."}); }
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
+  if (url.pathname.startsWith("/api/admin/")) { await handleAdmin(req, res, url); return; }
+  if (url.pathname === "/admin") url.pathname = "/admin.html";
   if (url.pathname === "/healthz") { res.writeHead(200, { "content-type": "text/plain" }); res.end("ok"); return; }
   if (url.pathname === "/stats.json") {
     const room = (url.searchParams.get("room") || "family").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "family";

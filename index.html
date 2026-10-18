@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="boggle-build" content="20261017-3">
+<meta name="boggle-build" content="20261018-1">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#1d3b4f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -481,8 +481,8 @@ header.top #status:hover,header.top #status[aria-expanded="true"]{border-color:v
           <li><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2 2M9 2h6M12 2v4"/></svg><span>Find 3+ letter words before time runs out.</span></li>
           <li><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-4"/></svg><span>Same board for everyone; words stay hidden until the end. Shared words still score.</span></li>
         </ul>
-        <div class="how-scoring"><h4>Letters → points</h4><dl class="how-score-grid"><div><dt>3–4</dt><dd>1</dd></div><div><dt>5</dt><dd>2</dd></div><div><dt>6</dt><dd>3</dd></div><div><dt>7</dt><dd>5</dd></div><div><dt>8+</dt><dd>11</dd></div></dl></div>
-        <p class="how-footnote">The Qu tile counts as two letters.</p>
+        <div class="how-scoring"><h4>Letters → points</h4><dl class="how-score-grid"><div><dt>3</dt><dd>1</dd></div><div><dt>4</dt><dd>2</dd></div><div><dt>5</dt><dd>3</dd></div><div><dt>6</dt><dd>4</dd></div><div><dt>7</dt><dd>5</dd></div></dl></div>
+        <p class="how-footnote">Each extra letter adds 1 point. In multiplayer, words only you find earn double points at the end. The Qu tile counts as two letters.</p>
       </div>
     </details>
   </section>
@@ -581,7 +581,7 @@ function hasPrefix(p){let lo=0,hi=WORDS.length;while(lo<hi){const mid=(lo+hi)>>1
 const NB=[];for(let i=0;i<16;i++){const r=i>>2,c=i&3,a=[];for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const rr=r+dr,cc=c+dc;if(rr>=0&&rr<4&&cc>=0&&cc<4)a.push(rr*4+cc);}NB.push(a);}
 function trace(board,word){const used=new Array(16).fill(false),path=[];function go(i,pos){const t=board[i];if(!word.startsWith(t,pos))return false;used[i]=true;path.push(i);const np=pos+t.length;if(np===word.length)return true;for(const j of NB[i])if(!used[j]&&go(j,np))return true;used[i]=false;path.pop();return false;}for(let i=0;i<16;i++)if(go(i,0))return path.slice();return null;}
 function solve(board){const out=new Set(),used=new Array(16).fill(false);function go(i,pre){const p=pre+board[i];if(!hasPrefix(p))return;used[i]=true;if(p.length>=3&&DICT.has(p))out.add(p);for(const j of NB[i])if(!used[j])go(j,p);used[i]=false;}for(let i=0;i<16;i++)go(i,'');return out;}
-function pts(n){return n<=4?1:n===5?2:n===6?3:n===7?5:11;}
+function pts(n){return Math.max(0,n-2);}
 const byLen=(a,b)=>b.length-a.length||(a<b?-1:1);
 const rid=()=>Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>(b%36).toString(36)).join('');
 
@@ -1118,6 +1118,15 @@ function renderPlay(){
   for(const p of players()){if(p.gid!==S.game.id)continue;ppl.append(h('span',{},(p.me?'You':p.name)+' ',h('b',{text:String(p.me?S.myWords.length:p.n)})));}
 }
 function validWords(words){return Array.from(new Set(words.filter(w=>typeof w==='string'&&w.length>=3&&DICT.has(w)&&trace(board,w))));}
+function scorePlayers(list){
+  const counts=new Map();
+  const scored=list.map(p=>{const ws=validWords(p.words);for(const w of ws)counts.set(w,(counts.get(w)||0)+1);return {...p,ws};});
+  for(const p of scored){
+    p.total=0;
+    p.rows=p.ws.sort(byLen).map(w=>{const bonus=scored.length>1&&counts.get(w)===1;const v=pts(w.length)*(bonus?2:1);p.total+=v;return {w,gone:false,v,bonus};});
+  }
+  return {scored,counts};
+}
 function roundPlayers(){
   const g=S.game;
   if(g.results&&Array.isArray(g.results))return g.results.map(r=>({id:r.id,name:String(r.name||'Player').slice(0,24),words:Array.isArray(r.words)?r.words:[],streak:Number(r.streak)||0}));
@@ -1178,8 +1187,7 @@ function renderResults(){
   $('#missed-panel').hidden=false;
   const list=roundPlayers();
   const all=solve(board);
-  const cnt=new Map();const scored=list.map(p=>{const ws=validWords(p.words);ws.forEach(w=>cnt.set(w,(cnt.get(w)||0)+1));return {...p,ws};});
-  for(const p of scored){p.total=0;p.rows=p.ws.sort(byLen).map(w=>{const shared=cnt.get(w)>1;const gone=false;const v=gone?0:pts(w.length);p.total+=v;return {w,gone,v};});}
+  const {scored,counts:cnt}=scorePlayers(list);
   scored.sort((a,b)=>b.total-a.total||b.ws.length-a.ws.length);
   const top=scored.length?scored[0].total:0;
   const rank=$('#rank');rank.textContent='';
@@ -1188,7 +1196,7 @@ function renderResults(){
     const win=scored.length>1&&p.total===top&&top>0;
     const chips=h('div',{class:'chips'});
     if(!p.rows.length)chips.append(h('span',{class:'muted',text:'No words found.'}));
-    p.rows.forEach((r,idx)=>chips.append(h('span',{class:'chip word-chip'+(r.gone?' gone':'')+(!r.gone&&idx===0&&r.w.length>=6?' best':''),title:r.gone?'Another player found this too':r.v+' pt',text:r.w})));
+    p.rows.forEach((r,idx)=>chips.append(h('span',{class:'chip word-chip'+(r.gone?' gone':'')+(!r.gone&&idx===0&&r.w.length>=6?' best':''),title:r.v+' pt'+(r.bonus?' (double points: only you found this)':''),text:r.w})));
     const awards=win?h('div',{class:'who-awards'},h('span',{class:'winner-label'},crownIcon(),'Winner'),(g.results&&p.streak>=2)?h('span',{class:'streak',title:p.streak+' round wins in a row',text:'\u{1F525} '+p.streak+' in a row'}):null):null;
     const initials=p.name.trim().split(/\s+/).slice(0,2).map(part=>Array.from(part)[0]||'').join('').toUpperCase();
     const head=h('div',{class:'who-head'},h('span',{class:'who-avatar','aria-hidden':'true',text:initials}),h('div',{class:'who-identity'},h('span',{class:'name',text:p.name}),awards),h('div',{class:'who-score'},h('span',{class:'score',text:String(p.total)}),h('span',{class:'score-unit',text:'POINTS'})));

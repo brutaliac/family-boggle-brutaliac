@@ -4,6 +4,24 @@ A live Boggle game for the whole family. Everyone opens the same link in a
 browser (phone, tablet or computer), no accounts or app installs. Anyone can
 start a round; everyone plays the same board at the same time.
 
+## Scoring and boards
+
+Words score 1 point for 3 letters, 2 for 4, 3 for 5, and one more point for
+each additional letter. Qu is one tile but counts as two letters. In multiplayer,
+words found by just one player earn double points when the round ends; shared
+words still earn base points. Solo rounds use base points. Word-entry feedback
+shows base points; the unique-word bonus is determined at the end.
+
+New rounds use these rules for results, wins, and saved statistics. Existing
+leaderboard history is preserved at its original scores.
+
+Boards roll one face from each of the 16 classic English dice, then shuffle
+their positions. By default, the generator favors boards with at least 50 words,
+a word of at least 7 letters, and at least 3 distinct words of 4+ letters ending
+in "er". Boards below the "er" target have a 30% chance of passing that filter.
+These thresholds can be overridden with the `BOGGLE_MIN_WORDS`, `BOGGLE_MIN_LONG`,
+`BOGGLE_MIN_ER`, and `BOGGLE_ER_SOFT` environment variables.
+
 ## Run it on your own computer (to try it)
 
     npm install

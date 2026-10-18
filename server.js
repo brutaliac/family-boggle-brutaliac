@@ -14,7 +14,7 @@ const { WebSocketServer } = require("ws");
 const PORT = Number(process.env.PORT) || 3000;
 // Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
 // The page can sit in ./public or right next to this file. If an old copy is left in one of them, use the newer build.
-const SERVER_BUILD = "20261016-5";
+const SERVER_BUILD = "20261018-1";
 function buildOf(dir) {
   try { const m = /name="boggle-build" content="([0-9-]+)"/.exec(fs.readFileSync(path.join(dir, "index.html"), "utf8")); return m ? m[1] : "0"; } catch (e) { return null; }
 }
@@ -31,8 +31,10 @@ const MIN_SECONDS = Number(process.env.BOGGLE_MIN_SECONDS) || 60;
 const FORCE_SECONDS = Number(process.env.BOGGLE_FORCE_SECONDS) || 0; // test hook only
 const GRACE_MS = 1500; // words sent just after the buzzer still count
 
-const DICE = ["AAEEGN", "ELRTTY", "AOOTTW", "ABBJOO", "EHRTVW", "CIMOTU", "DISTTY", "EIOSST",
-  "DELRVY", "ACHOPS", "HIMNQU", "EEINSU", "EEGHNW", "AFFKPS", "HLNNRZ", "DEILRX"];
+// Classic English 4x4 Boggle: 16 six-sided dice, one roll per die.
+// Q represents the single Qu face; rollBoard expands it to the two-letter tile "qu".
+const DICE = ["AEANEG", "AHSPCO", "ASPFFK", "OBJOAB", "IOTMUC", "RYVDEL", "LREIXD", "EIUNES",
+  "WNGEEH", "LNHNRZ", "TSTIYD", "OWTOAT", "ERTTYL", "TOESSI", "TERWHV", "NUIHMQ"];
 const rnd = (n) => crypto.randomInt(n);
 function rollBoard() {
   const d = DICE.slice();
@@ -79,7 +81,12 @@ function analyze(b) {
     const p = pre + b[i];
     if (!hasPrefix(p)) return;
     used[i] = true;
-    if (p.length >= 3 && WORDSET.has(p)) { out.add(p); if (p.length > longest) longest = p.length; if (p.length >= 4 && p.endsWith("er")) er++; }
+    // A word may have several paths; count it only on its first discovery.
+    if (p.length >= 3 && WORDSET.has(p) && !out.has(p)) {
+      out.add(p);
+      if (p.length > longest) longest = p.length;
+      if (p.length >= 4 && p.endsWith("er")) er++;
+    }
     for (const j of NB[i]) if (!used[j]) go(j, p);
     used[i] = false;
   }
@@ -139,8 +146,8 @@ function broadcast(r) {
     if (p.ws && p.ws.readyState === 1) { try { p.ws.send(JSON.stringify(snapshotFor(r, p))); } catch (e) { /* ignore */ } }
   }
 }
-// scoring mirrors the page: 3-4 letters 1, 5 -> 2, 6 -> 3, 7 -> 5, 8+ -> 11 (shared words count for everyone)
-const ptsFor = (n) => (n <= 4 ? 1 : n === 5 ? 2 : n === 6 ? 3 : n === 7 ? 5 : 11);
+// Base points: 3 letters -> 1, then +1 for each extra letter.
+const ptsFor = (n) => Math.max(0, n - 2);
 function traceable(board, word) {
   const used = new Array(16).fill(false);
   function go(i, pos) {
@@ -156,10 +163,17 @@ function traceable(board, word) {
   for (let i = 0; i < 16; i++) if (go(i, 0)) return true;
   return false;
 }
-function scoreWords(board, words) {
+function scoreWords(board, words, uniqueWords = new Set()) {
   let total = 0;
-  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length);
+  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length) * (uniqueWords.has(w) ? 2 : 1);
   return total;
+}
+function scoreRound(board, players) {
+  const valid = new Map(players.map(p => [p, validWordList(board, p.words)]));
+  const counts = new Map();
+  for (const words of valid.values()) for (const w of words) counts.set(w, (counts.get(w) || 0) + 1);
+  const unique = new Set(players.length > 1 ? [...counts].filter(([, n]) => n === 1).map(([w]) => w) : []);
+  return new Map(players.map(p => [p, scoreWords(board, valid.get(p), unique)]));
 }
 /* ---------- all-time stats: saved to disk, backed up to a private GitHub Gist ---------- */
 // On Render's free plan the disk and memory are wiped whenever the service sleeps or redeploys,
@@ -341,7 +355,7 @@ function recordRound(r, g, inRound, totals, winners) {
 function finalize(r, g) {
   if (r.game !== g || g.results) return;
   const inRound = [...r.players.values()].filter((p) => p.gid === g.id);
-  const totals = new Map(inRound.map((p) => [p, scoreWords(g.board, p.words)]));
+  const totals = scoreRound(g.board, inRound);
   const top = Math.max(0, ...totals.values());
   // a winner needs at least one opponent and at least one point; a tie crowns everyone tied
   const winners = new Set(inRound.length > 1 && top > 0 ? inRound.filter((p) => totals.get(p) === top) : []);

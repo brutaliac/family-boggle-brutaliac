@@ -14,7 +14,7 @@ const { WebSocketServer } = require("ws");
 const PORT = Number(process.env.PORT) || 3000;
 // Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
 // The page can sit in ./public or right next to this file. If an old copy is left in one of them, use the newer build.
-const SERVER_BUILD = "20261018-1";
+const SERVER_BUILD = "20261018-2";
 function buildOf(dir) {
   try { const m = /name="boggle-build" content="([0-9-]+)"/.exec(fs.readFileSync(path.join(dir, "index.html"), "utf8")); return m ? m[1] : "0"; } catch (e) { return null; }
 }
@@ -564,6 +564,10 @@ load("index.html", "text/html; charset=utf-8");
 load("manifest.webmanifest", "application/manifest+json");
 load("icon.png", "image/png");
 load("voice.js", "text/javascript; charset=utf-8");
+load("sudoku.html", "text/html; charset=utf-8");
+load("sudoku.css", "text/css; charset=utf-8");
+load("sudoku-engine.js", "text/javascript; charset=utf-8");
+load("sudoku.js", "text/javascript; charset=utf-8");
 files["/"] = files["/index.html"];
 
 const server = http.createServer((req, res) => {

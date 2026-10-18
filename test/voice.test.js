@@ -111,4 +111,14 @@ test('room voice signaling lifecycle and isolation', async t => {
   assert.equal(js.status, 200);
   assert.match(js.headers.get('content-type'), /javascript/);
   assert.match(await js.text(), /window\.renderVoiceAvatars/);
+  // The real server must serve Sudoku and all its assets, not just link to it.
+  assert.match(page, /<\/details>\s*<a class="sudoku-entry"[^>]*href="\/sudoku\.html"/);
+  for (const [file, type] of [['sudoku.html', 'text/html'], ['sudoku.css', 'text/css'],
+    ['sudoku-engine.js', 'text/javascript'], ['sudoku.js', 'text/javascript']]) {
+    const response = await fetch(`http://127.0.0.1:${port}/${file}?v=test`);
+    assert.equal(response.status, 200);
+    assert.ok(response.headers.get('content-type').startsWith(type));
+    assert.equal(response.headers.get('cache-control'), 'no-cache');
+    assert.ok((await response.text()).length > 100);
+  }
 });

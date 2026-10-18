@@ -4,6 +4,32 @@ A live Boggle game for the whole family. Everyone opens the same link in a
 browser (phone, tablet or computer), no accounts or app installs. Anyone can
 start a round; everyone plays the same board at the same time.
 
+## Single-player Sudoku
+
+Choose **Play Sudoku** at the bottom of the lobby, below **How to play**.
+The **← Boggle** button returns to the same room. Sudoku runs locally and
+does not create a Boggle round or write to the multiplayer leaderboard.
+
+Tap a square, then a number. Use Notes to enter pencil marks, Undo to reverse
+an edit, Erase to clear a square, and Hint to reveal a value. Keyboard controls:
+1–9 enter numbers, arrow keys select squares, N toggles notes, and Backspace
+or Delete erases. Pause hides the board. The timer excludes time in a hidden
+tab or while the phone is locked. Progress and display preferences are saved
+on this device; when browser storage is unavailable, a message explains that
+closing the tab will lose progress. Undo history lasts for the current visit.
+
+Easy, Medium, and Hard use curated, uniquely solvable base puzzles transformed
+by shuffled digits, bands, stacks, rows/columns within them, and transposition.
+These transformations preserve solving logic and uniqueness. Easy is solvable
+with naked singles, Medium also needs hidden singles, and Hard needs techniques
+beyond those two. Each generated puzzle is checked for exactly one solution.
+Difficulty changes apply when **New puzzle** is confirmed. Hints reveal a value;
+they do not teach a solving technique. There is no hint limit.
+
+Deploy `sudoku.html`, `sudoku.css`, `sudoku-engine.js`, and `sudoku.js` beside
+`index.html` in the same directory served by `server.js` (root or `public/`).
+No new dependencies or environment variables are required.
+
 ## Scoring and boards
 
 Words score 1 point for 3 letters, 2 for 4, 3 for 5, and one more point for

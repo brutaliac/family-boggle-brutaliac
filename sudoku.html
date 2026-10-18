@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1d3b4f">
+<link rel="icon" href="/icon.png">
+<title>Sudoku</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+<link rel="stylesheet" href="/sudoku.css?v=20261018-1">
+<script src="/sudoku-engine.js?v=20261018-1" defer></script>
+<script src="/sudoku.js?v=20261018-1" defer></script>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1><svg class="logo" viewBox="0 0 36 36" aria-hidden="true"><rect x="1" y="1" width="34" height="34" rx="3" fill="#f7f2e4" stroke="#1d3b4f" stroke-width="2"/><path d="M12 2v32M24 2v32M2 12h32M2 24h32" fill="none" stroke="#9aa6a9"/><rect x="12.5" y="12.5" width="11" height="11" fill="#f0a81e"/><text x="18" y="22" text-anchor="middle" font-size="11" font-weight="800" font-family="system-ui,sans-serif" fill="#2b1c00">S</text></svg>Sudoku</h1>
+    <div class="header-actions"><a class="back" id="back" href="/">← Boggle</a><button id="theme" aria-label="Switch color theme" title="Switch color theme">◐</button></div>
+  </header>
+  <section class="panel" aria-label="Sudoku game">
+    <div class="boardtop">
+      <select id="difficulty" aria-label="Difficulty for next puzzle"><option>Easy</option><option selected>Medium</option><option>Hard</option></select>
+      <div class="time"><span id="timer" aria-label="Elapsed time">00:00</span><button id="pause" aria-label="Pause game" title="Pause game">Ⅱ</button></div>
+    </div>
+    <div class="boardwrap">
+      <div id="board" class="board" role="group" aria-label="Sudoku board"></div>
+      <button id="resume" hidden>▶ Resume</button>
+    </div>
+    <div class="tools" aria-label="Editing tools">
+      <button id="undo" disabled><svg viewBox="0 0 28 30" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a8 8 0 1 1-8 8"/></svg>Undo</button>
+      <button id="erase"><svg viewBox="0 0 28 30" aria-hidden="true"><path d="m16 3 8 8-12 12H6l-5-5L16 3ZM9 10l8 8M12 23h13"/></svg>Erase</button>
+      <button id="notes" aria-pressed="false"><svg viewBox="0 0 28 30" aria-hidden="true"><path d="m18 3 6 6-15 15-7 2 2-7L18 3ZM14 7l6 6M4 19l5 5M15 26h10"/></svg>Notes <small id="noteState">OFF</small></button>
+      <button id="hint"><svg viewBox="0 0 28 30" aria-hidden="true"><path d="M9 21c0-5-5-5-5-11a9 9 0 0 1 18 0c0 6-5 6-5 11M9 21h8M10 25h6M11 28h4"/></svg>Hint</button>
+    </div>
+    <div id="pad" class="numpad" role="group" aria-label="Enter a number"></div>
+  </section>
+  <section class="panel options" aria-label="Game options">
+    <label class="check"><input id="conflicts" type="checkbox" checked>Highlight conflicts</label>
+    <button id="new" class="primary">New puzzle</button>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+  <noscript>Enable JavaScript to play Sudoku.</noscript>
+</main>
+<dialog id="newDialog" aria-labelledby="newTitle"><h2 id="newTitle">New puzzle?</h2><p id="newDescription">Replace your current puzzle?</p><div class="dialog-actions"><button id="cancelNew" autofocus>Keep playing</button><button id="confirmNew" class="primary">New puzzle</button></div></dialog>
+<dialog id="completeDialog" aria-labelledby="completeTitle"><h2 id="completeTitle">Puzzle complete!</h2><p id="completeDescription"></p><div class="dialog-actions"><button id="closeComplete" autofocus>View board</button><button id="nextPuzzle" class="primary">New puzzle</button></div></dialog>
+</body>
+</html>

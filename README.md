@@ -172,3 +172,12 @@ the game open during play.
 
 Run `npm test` for room isolation, session validation, mute/leave/disconnect,
 replacement tabs, capacity, TURN credentials, and asset delivery checks.
+
+
+### Merge duplicate player stats
+
+Set `BOGGLE_ADMIN_PASSWORD` to a long, unique password in the server environment (Coolify: Environment Variables), redeploy, then visit `/admin` on the game’s HTTPS address. Admin access is disabled until the variable is set. The password stays in page memory only; locking or reloading clears it.
+
+Select a room, the duplicate name, and the profile to retain. Review the preview and confirm. Games, wins, points, and words are added; best round, longest word, most words, and best streak retain the better record. Existing totals cannot reveal overlapping rounds, so review before merging. Merges are blocked during active rounds and when the preview is stale.
+
+The old name redirects future scores to the retained stats record. This does not combine browser sessions or introduce login profiles. Original records and previous aliases are archived in `rooms[room].mergeHistory` inside `stats.json`, including the existing Gist backup. Recovery is manual: stop the server, restore the archived records and aliases in the authoritative stats file, update its `updatedAt`, and restart. Do not restore blindly after additional games.

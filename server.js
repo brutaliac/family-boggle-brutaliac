@@ -11,17 +11,33 @@ const zlib = require("zlib");
 const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
 const { PostgresStore } = require("./postgres-store");
+const { encodeBackup, writeVerifiedBackup } = require("./state-backup");
+const { validStats, validRejected: validRej } = require("./state-validation");
 
 const PORT = Number(process.env.PORT) || 3000;
 // Page files normally live in ./public. If they were uploaded flat next to server.js, use those.
-const PUBLIC = fs.existsSync(path.join(__dirname, "public", "index.html")) ? path.join(__dirname, "public") : __dirname;
+// The page can sit in ./public or right next to this file. If an old copy is left in one of them, use the newer build.
+const SERVER_BUILD = "20261018-2";
+function buildOf(dir) {
+  try { const m = /name="boggle-build" content="([0-9-]+)"/.exec(fs.readFileSync(path.join(dir, "index.html"), "utf8")); return m ? m[1] : "0"; } catch (e) { return null; }
+}
+const PUBLIC = (() => {
+  const a = path.join(__dirname, "public"), bb = buildOf(a), cb = buildOf(__dirname);
+  if (bb === null) return __dirname;
+  if (cb === null) return a;
+  return cb > bb ? __dirname : a;
+})();
+const PAGE_BUILD = buildOf(PUBLIC) || "?";
+console.log("Serving the page from " + PUBLIC + " (page build " + PAGE_BUILD + ", server build " + SERVER_BUILD + ")");
 const COUNTDOWN_MS = Number(process.env.BOGGLE_COUNTDOWN_MS) || 3000;
 const MIN_SECONDS = Number(process.env.BOGGLE_MIN_SECONDS) || 60;
 const FORCE_SECONDS = Number(process.env.BOGGLE_FORCE_SECONDS) || 0; // test hook only
 const GRACE_MS = 1500; // words sent just after the buzzer still count
 
-const DICE = ["AAEEGN", "ELRTTY", "AOOTTW", "ABBJOO", "EHRTVW", "CIMOTU", "DISTTY", "EIOSST",
-  "DELRVY", "ACHOPS", "HIMNQU", "EEINSU", "EEGHNW", "AFFKPS", "HLNNRZ", "DEILRX"];
+// Classic English 4x4 Boggle: 16 six-sided dice, one roll per die.
+// Q represents the single Qu face; rollBoard expands it to the two-letter tile "qu".
+const DICE = ["AEANEG", "AHSPCO", "ASPFFK", "OBJOAB", "IOTMUC", "RYVDEL", "LREIXD", "EIUNES",
+  "WNGEEH", "LNHNRZ", "TSTIYD", "OWTOAT", "ERTTYL", "TOESSI", "TERWHV", "NUIHMQ"];
 const rnd = (n) => crypto.randomInt(n);
 function rollBoard() {
   const d = DICE.slice();
@@ -68,7 +84,12 @@ function analyze(b) {
     const p = pre + b[i];
     if (!hasPrefix(p)) return;
     used[i] = true;
-    if (p.length >= 3 && WORDSET.has(p)) { out.add(p); if (p.length > longest) longest = p.length; if (p.length >= 4 && p.endsWith("er")) er++; }
+    // A word may have several paths; count it only on its first discovery.
+    if (p.length >= 3 && WORDSET.has(p) && !out.has(p)) {
+      out.add(p);
+      if (p.length > longest) longest = p.length;
+      if (p.length >= 4 && p.endsWith("er")) er++;
+    }
     for (const j of NB[i]) if (!used[j]) go(j, p);
     used[i] = false;
   }
@@ -128,8 +149,8 @@ function broadcast(r) {
     if (p.ws && p.ws.readyState === 1) { try { p.ws.send(JSON.stringify(snapshotFor(r, p))); } catch (e) { /* ignore */ } }
   }
 }
-// scoring mirrors the page: 3-4 letters 1, 5 -> 2, 6 -> 3, 7 -> 5, 8+ -> 11 (shared words count for everyone)
-const ptsFor = (n) => (n <= 4 ? 1 : n === 5 ? 2 : n === 6 ? 3 : n === 7 ? 5 : 11);
+// Base points: 3 letters -> 1, then +1 for each extra letter.
+const ptsFor = (n) => Math.max(0, n - 2);
 function traceable(board, word) {
   const used = new Array(16).fill(false);
   function go(i, pos) {
@@ -145,10 +166,17 @@ function traceable(board, word) {
   for (let i = 0; i < 16; i++) if (go(i, 0)) return true;
   return false;
 }
-function scoreWords(board, words) {
+function scoreWords(board, words, uniqueWords = new Set()) {
   let total = 0;
-  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length);
+  for (const w of new Set(words)) if (w.length >= 3 && WORDSET.has(w) && traceable(board, w)) total += ptsFor(w.length) * (uniqueWords.has(w) ? 2 : 1);
   return total;
+}
+function scoreRound(board, players) {
+  const valid = new Map(players.map(p => [p, validWordList(board, p.words)]));
+  const counts = new Map();
+  for (const words of valid.values()) for (const w of words) counts.set(w, (counts.get(w) || 0) + 1);
+  const unique = new Set(players.length > 1 ? [...counts].filter(([, n]) => n === 1).map(([w]) => w) : []);
+  return new Map(players.map(p => [p, scoreWords(board, valid.get(p), unique)]));
 }
 /* ---------- all-time stats: saved to disk, backed up to a private GitHub Gist ---------- */
 // On Render's free plan the disk and memory are wiped whenever the service sleeps or redeploys,
@@ -177,7 +205,6 @@ function databaseFailed(error) {
   process.exit(1);
 }
 
-function validStats(o) { return o && typeof o === "object" && o.rooms && typeof o.rooms === "object"; }
 function loadStatsFile() {
   try {
     const o = JSON.parse(fs.readFileSync(STATS_FILE, "utf8"));
@@ -215,7 +242,6 @@ async function findGist() {
   }
   return "";
 }
-function validRej(o) { return o && typeof o === "object" && o.words && typeof o.words === "object"; }
 let rejBackup = null;
 async function pullBackup() {
   if (!GITHUB_TOKEN) return null;
@@ -247,6 +273,7 @@ async function pushBackup() {
   if (pushing) { pushAgain = true; return; }
   pushing = true;
   try {
+    if (database) await database.flush();
     const content = JSON.stringify(stats);
     const rcontent = JSON.stringify(rejected);
     let id = await findGist();
@@ -264,7 +291,7 @@ async function pushBackup() {
 function scheduleBackup() { if (!GITHUB_TOKEN || pushTimer) return; pushTimer = setTimeout(() => { pushTimer = null; pushBackup(); }, PUSH_DELAY_MS); }
 async function flushBackup() { if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; } await pushBackup(); }
 function saveStats() {
-  stats.updatedAt = Date.now();
+  stats.updatedAt = Math.max(Date.now(), stats.updatedAt + 1);
   if (database) database.save(stats, rejected).then(() => { if (!database.failure) scheduleBackup(); });
   else { writeStatsFile(); scheduleBackup(); }
 }
@@ -320,7 +347,10 @@ async function loadLegacyState() {
 async function initStats() {
   if (!DATABASE_URL) { await loadLegacyState(); return; }
   database = new PostgresStore(DATABASE_URL, databaseFailed);
-  const state = await database.init(loadLegacyState);
+  const state = await database.init(loadLegacyState, state => {
+    const file = writeVerifiedBackup(process.env.BOGGLE_BACKUP_DIR, state);
+    console.log("Verified pre-import backup saved to " + file);
+  });
   if (!validStats(state.stats) || !validRej(state.rejected)) throw new Error("Invalid PostgreSQL state");
   stats = state.stats;
   rejected = state.rejected;
@@ -355,11 +385,12 @@ function recordRound(r, g, inRound, totals, winners) {
   for (const p of inRound) {
     const valid = validWordList(g.board, p.words);
     if (!valid.length && !p.ws) continue; // someone who left a tab open and never played does not get a game
-    const key = nameKey(p.name);
+    const originalKey = nameKey(p.name);
+    const key = (room.aliases && Object.hasOwn(room.aliases, originalKey) && room.aliases[originalKey]) || originalKey;
     if (!key) continue;
     if (!room.players[key] && Object.keys(room.players).length >= 200) continue;
     const e = (room.players[key] = room.players[key] || { name: p.name, games: 0, wins: 0, points: 0, words: 0, bestScore: 0, mostWords: 0, longestWord: "", bestStreak: 0 });
-    e.name = p.name; e.games++; e.points += totals.get(p); e.words += valid.length; e.last = now;
+    if (key === originalKey) e.name = p.name; e.games++; e.points += totals.get(p); e.words += valid.length; e.last = now;
     if (winners.has(p)) e.wins++;
     const sc = totals.get(p);
     if (sc > e.bestScore) { e.bestScore = sc; e.bestScoreAt = now; if (sc > prev.score && (!best.score || sc > best.score.v)) best.score = { n: p.name, v: sc }; }
@@ -380,7 +411,7 @@ function recordRound(r, g, inRound, totals, winners) {
 function finalize(r, g) {
   if (stopping || r.game !== g || g.results) return;
   const inRound = [...r.players.values()].filter((p) => p.gid === g.id);
-  const totals = new Map(inRound.map((p) => [p, scoreWords(g.board, p.words)]));
+  const totals = scoreRound(g.board, inRound);
   const top = Math.max(0, ...totals.values());
   // a winner needs at least one opponent and at least one point; a tie crowns everyone tied
   const winners = new Set(inRound.length > 1 && top > 0 ? inRound.filter((p) => totals.get(p) === top) : []);
@@ -409,6 +440,70 @@ const CHAT_MAX_LEN = 200;
 function cleanChat(s) { return String(s || "").replace(/[\u0000-\u001f\u007f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, CHAT_MAX_LEN); }
 function sendRaw(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch (e) { /* ignore */ } } }
 function broadcastRaw(r, obj) { for (const p of r.players.values()) sendRaw(p.ws, obj); }
+/* Voice media travels over WebRTC; this server only relays room-local signaling. */
+const VOICE_LIMIT = 8;
+const ICE_SERVERS = (() => {
+  const fallback = [{ urls: "stun:stun.l.google.com:19302" }];
+  if (!process.env.VOICE_ICE_SERVERS) return fallback;
+  const servers = JSON.parse(process.env.VOICE_ICE_SERVERS);
+  if (!Array.isArray(servers) || !servers.length || servers.some(s => !s ||
+    !(typeof s.urls === "string" || (Array.isArray(s.urls) && s.urls.length && s.urls.every(u => typeof u === "string"))))) {
+    throw new Error("VOICE_ICE_SERVERS must be a non-empty JSON array of RTCIceServer objects");
+  }
+  return servers;
+})();
+const TURN_URLS = (process.env.VOICE_TURN_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
+if (TURN_URLS.length && !process.env.VOICE_TURN_SECRET) throw new Error("VOICE_TURN_URLS requires VOICE_TURN_SECRET");
+function voiceIceFor(p) {
+  if (!TURN_URLS.length) return ICE_SERVERS;
+  // coturn's shared-secret authentication: clients get expiring credentials, never the secret.
+  const username = Math.floor(Date.now() / 1000 + 86400) + ":" + p.id;
+  const credential = crypto.createHmac("sha1", process.env.VOICE_TURN_SECRET).update(username).digest("base64");
+  return [...ICE_SERVERS, { urls: TURN_URLS, username, credential }];
+}
+function voiceRoster(r) {
+  return [...r.players.values()].filter(p => p.ws && p.voice).map(p => ({
+    id: p.id, name: p.name, muted: p.voiceMuted, session: p.voice,
+  }));
+}
+function broadcastVoice(r) { broadcastRaw(r, { t: "voice-roster", peers: voiceRoster(r) }); }
+function leaveVoice(r, p) {
+  if (!p.voice) return;
+  p.voice = null; p.voiceMuted = true;
+  broadcastVoice(r);
+}
+function handleVoice(r, p, m) {
+  if (m.t === "voice-join") {
+    if (!p.name) { sendRaw(p.ws, { t: "voice-error", message: "Enter your name before joining voice." }); return; }
+    if (!p.voice && voiceRoster(r).length >= VOICE_LIMIT) {
+      sendRaw(p.ws, { t: "voice-error", message: "Voice is full (8 people)." }); return;
+    }
+    p.voice = p.voice || crypto.randomBytes(8).toString("hex");
+    p.voiceMuted = !!m.muted;
+    sendRaw(p.ws, { t: "voice-ready", iceServers: voiceIceFor(p), session: p.voice });
+    broadcastVoice(r); return;
+  }
+  if (m.t === "voice-leave") { leaveVoice(r, p); return; }
+  if (!p.voice) return;
+  if (m.t === "voice-mute") { p.voiceMuted = !!m.muted; broadcastVoice(r); return; }
+  if (m.t !== "voice-signal" || m.session !== p.voice) return;
+  const target = [...r.players.values()].find(q => q.id === m.to && q.id !== p.id && q.ws && q.voice && q.voice === m.toSession);
+  if (!target) return;
+  const d = m.description, c = m.candidate;
+  let signal;
+  if (d && ["offer", "answer"].includes(d.type) && typeof d.sdp === "string" && d.sdp.length <= 16000) {
+    signal = { description: { type: d.type, sdp: d.sdp } };
+  } else if (c && typeof c.candidate === "string" && c.candidate.length <= 2048) {
+    signal = { candidate: { candidate: c.candidate, sdpMid: typeof c.sdpMid === "string" ? c.sdpMid.slice(0, 256) : null,
+      sdpMLineIndex: Number.isInteger(c.sdpMLineIndex) ? c.sdpMLineIndex : null,
+      usernameFragment: typeof c.usernameFragment === "string" ? c.usernameFragment.slice(0, 256) : undefined } };
+  } else return;
+  const now = Date.now();
+  p.voiceSignals = (p.voiceSignals || []).filter(t => now - t < 10000);
+  if (p.voiceSignals.length >= 300) return;
+  p.voiceSignals.push(now);
+  sendRaw(target.ws, { t: "voice-signal", from: p.id, session: p.voice, toSession: target.voice, ...signal });
+}
 function handleChat(r, p, m) {
   if (!p.name) return;
   const text = cleanChat(m.text);
@@ -446,7 +541,7 @@ function handleBurst(r, p, m) {
   const g = r.game;
   if (!p.name || !g || !g.results || !FX_KEYS.includes(m.key)) return;
   const target = g.results.find((x) => x.id === m.to);
-  if (!target || target.id === p.id) return;
+  if (!target) return;
   g.fx = g.fx || [];
   const now = Date.now();
   p.fxTimes = (p.fxTimes || []).filter((t) => now - t < 5000);
@@ -468,7 +563,7 @@ function handle(r, ws, m) {
     if (!key) return;
     let p = r.players.get(key);
     if (!p) { p = { id: crypto.randomBytes(5).toString("hex"), key, name: "", ws: null, gid: null, words: [] }; r.players.set(key, p); }
-    if (p.ws && p.ws !== ws) { try { p.ws.close(); } catch (e) { /* ignore */ } }
+    if (p.ws && p.ws !== ws) { leaveVoice(r, p); try { p.ws.close(); } catch (e) { /* ignore */ } }
     p.ws = ws; ws.player = p;
     p.name = cleanName(m.name) || p.name;
     const ph = phaseOf(r);
@@ -476,15 +571,17 @@ function handle(r, ws, m) {
     broadcast(r);
     sendRaw(ws, { t: "chatlog", msgs: r.chat });
     sendRaw(ws, { t: "stats", stats: boardFor(r.name) });
+    sendRaw(ws, { t: "voice-roster", peers: voiceRoster(r) });
     return;
   }
   const p = ws.player;
-  if (!p) return;
+  if (!p || p.ws !== ws) return;
+  if (typeof m.t === "string" && m.t.startsWith("voice-")) { handleVoice(r, p, m); return; }
   if (m.t === "chat") { handleChat(r, p, m); return; }
   if (m.t === "react") { handleReact(r, p, m); return; }
   if (m.t === "burst") { handleBurst(r, p, m); return; }
   if (m.t === "reject") { handleReject(r, p, m); return; }
-  if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); return; }
+  if (m.t === "name") { p.name = cleanName(m.name) || p.name; broadcast(r); if (p.voice) broadcastVoice(r); return; }
   if (m.t === "start") {
     const ph = phaseOf(r);
     if (ph !== "lobby" && ph !== "done") return;
@@ -523,15 +620,96 @@ function load(name, type) {
 load("index.html", "text/html; charset=utf-8");
 load("manifest.webmanifest", "application/manifest+json");
 load("icon.png", "image/png");
+load("admin.html", "text/html; charset=utf-8");
+load("admin.js", "text/javascript; charset=utf-8");
+load("voice.js", "text/javascript; charset=utf-8");
+load("sudoku.html", "text/html; charset=utf-8");
+load("sudoku.css", "text/css; charset=utf-8");
+load("sudoku-engine.js", "text/javascript; charset=utf-8");
+load("sudoku.js", "text/javascript; charset=utf-8");
 files["/"] = files["/index.html"];
 
-const server = http.createServer((req, res) => {
+
+// Admin credentials are sent only in an Authorization header and never stored by the page.
+const ADMIN_PASSWORD = process.env.BOGGLE_ADMIN_PASSWORD || "";
+let adminWritePending = false;
+const adminDigest = s => crypto.createHash("sha256").update(s).digest();
+async function handleAdmin(req, res, url) {
+  const reply = (code, body) => { res.writeHead(code, {"content-type":"application/json", "cache-control":"no-store", "x-content-type-options":"nosniff"}); res.end(JSON.stringify(body)); };
+  if (!ADMIN_PASSWORD) return reply(503, {error:"Set BOGGLE_ADMIN_PASSWORD on the server to enable admin access."});
+  const supplied = (req.headers.authorization || "").replace(/^Bearer /, "");
+  if (!crypto.timingSafeEqual(adminDigest(supplied), adminDigest(ADMIN_PASSWORD))) return reply(401, {error:"Incorrect admin password."});
+  if (stopping) return reply(503,{error:"Server is stopping. Try again after restart."});
+  if (url.pathname === "/api/admin/backup" && req.method === "GET") {
+    try {
+      if (database) await database.flush();
+      const backup = encodeBackup({stats,rejected});
+      res.writeHead(200,{"content-type":"application/json", "cache-control":"no-store", "content-disposition":'attachment; filename="family-boggle-backup-'+Date.now()+'.json"', "x-content-type-options":"nosniff"});
+      res.end(backup); return;
+    } catch(e) { return reply(503,{error:"Backup could not be created."}); }
+  }
+  if (url.pathname === "/api/admin/players" && req.method === "GET") {
+    return reply(200, {updatedAt:stats.updatedAt, rooms:Object.entries(stats.rooms).map(([name, room]) => ({name, players:Object.entries(room.players).map(([key, p]) => ({...p,key}))}))});
+  }
+  if (url.pathname !== "/api/admin/merge" || req.method !== "POST") return reply(404, {error:"Not found."});
+  try {
+    let body = "";
+    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) return reply(413, {error:"Request too large."}); }
+    if (adminWritePending) return reply(409,{error:"Another merge is being saved. Refresh and try again."});
+    const m = JSON.parse(body), room = Object.hasOwn(stats.rooms,m.room) ? stats.rooms[m.room] : null;
+    if (!room || typeof m.source !== "string" || typeof m.target !== "string" || m.source === m.target || !Object.hasOwn(room.players,m.source) || !Object.hasOwn(room.players,m.target)) return reply(400,{error:"Select two different existing players in the same room."});
+    if (m.updatedAt !== stats.updatedAt) return reply(409,{error:"Stats changed. Refresh and review the preview again."});
+    const live = rooms.get(m.room);
+    if (live && live.game && !live.game.results && phaseOf(live) === "done") { finalize(live, live.game); return reply(409,{error:"Round results were saved. Refresh and review the preview again."}); }
+    if (live && ["count","play"].includes(phaseOf(live))) return reply(409,{error:"Wait for the current round to finish before merging."});
+    const next = JSON.parse(JSON.stringify(stats)), r = next.rooms[m.room];
+    const a = r.players[m.source], b = r.players[m.target];
+    r.mergeHistory = r.mergeHistory || [];
+    r.mergeHistory.push({at:Date.now(),sourceKey:m.source,targetKey:m.target,source:{...a},target:{...b},aliases:{...r.aliases}});
+    for (const field of ["games","wins","points","words"]) b[field] = (Number(a[field])||0)+(Number(b[field])||0);
+    if ((a.bestScore||0) > (b.bestScore||0)) { b.bestScore=a.bestScore; b.bestScoreAt=a.bestScoreAt; }
+    for (const field of ["mostWords","bestStreak","last"]) b[field]=Math.max(a[field]||0,b[field]||0);
+    if ((a.longestWord||"").length > (b.longestWord||"").length) b.longestWord=a.longestWord;
+    delete r.players[m.source];
+    r.aliases = r.aliases || {};
+    for (const key of Object.keys(r.aliases)) if (r.aliases[key] === m.source) r.aliases[key]=m.target;
+    r.aliases[m.source]=m.target;
+    next.updatedAt=Math.max(Date.now(),stats.updatedAt+1);
+    // A successful response requires a saved snapshot in the authoritative store.
+    if (database) {
+      // Queue the snapshot and publish the new identity mapping synchronously, so
+      // rounds in other rooms cannot overwrite it while database I/O is pending.
+      adminWritePending = true;
+      const saved = database.save(next,rejected);
+      stats = next;
+      try { await saved; if (database.failure) throw database.failure; }
+      finally { adminWritePending = false; }
+    } else {
+      fs.mkdirSync(DATA_DIR,{recursive:true});
+      fs.writeFileSync(STATS_FILE+".tmp",JSON.stringify(next));
+      fs.renameSync(STATS_FILE+".tmp",STATS_FILE);
+      stats = next;
+    }
+    scheduleBackup();
+    if (live) broadcastRaw(live,{t:"stats",stats:boardFor(m.room)});
+    return reply(200,{ok:true,name:b.name});
+  } catch(e) { return reply(400,{error:e instanceof SyntaxError ? "Invalid request." : "Merge could not be saved. Original records were kept."}); }
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
+  if (url.pathname.startsWith("/api/admin/")) { await handleAdmin(req, res, url); return; }
+  if (url.pathname === "/admin") url.pathname = "/admin.html";
   if (url.pathname === "/healthz") { res.writeHead(200, { "content-type": "text/plain" }); res.end("ok"); return; }
   if (url.pathname === "/stats.json") {
     const room = (url.searchParams.get("room") || "family").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "family";
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ room, ...boardFor(room), backup: { enabled: backupInfo.enabled, lastOk: backupInfo.lastOk || null, lastError: backupInfo.lastError || null } }));
+    return;
+  }
+  if (url.pathname === "/version") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ server: SERVER_BUILD, page: PAGE_BUILD, servedFrom: PUBLIC === __dirname ? "next to server.js" : "public folder" }));
     return;
   }
   if (url.pathname === "/rejected.txt" || url.pathname === "/rejected.json") {
@@ -570,7 +748,7 @@ wss.on("connection", (ws, req) => {
   });
   ws.on("close", () => {
     const p = ws.player;
-    if (p && p.ws === ws) { p.ws = null; broadcast(r); }
+    if (p && p.ws === ws) { p.ws = null; leaveVoice(r, p); broadcast(r); }
   });
   ws.on("error", () => {});
 });

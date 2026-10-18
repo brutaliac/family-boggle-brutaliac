@@ -24,7 +24,7 @@ test("empty database imports both documents together with parameterized SQL", as
     if (sql.startsWith("INSERT")) insert = values;
     return { rows: sql.includes("pg_try") ? [{ acquired: true }] : [] };
   });
-  assert.deepEqual(await store.init(async () => state), state);
+  assert.deepEqual(await store.init(async () => state, async () => {}), state);
   assert.deepEqual(insert.map(JSON.parse), [state.stats, state.rejected]);
   await store.close();
 });
@@ -66,4 +66,13 @@ test("a deleted state row is a persistence failure", async () => {
   const store = fakeStore(async () => ({ rowCount: 0 }));
   store.save({}, {});
   await assert.rejects(store.close(), /Missing PostgreSQL state row/);
+});
+
+
+test("first import refuses to insert if verified backup is missing or fails", async () => {
+  let inserts = 0;
+  const store = fakeStore(async sql => { if(sql.startsWith("INSERT")) inserts++; return {rows:sql.includes("pg_try")?[{acquired:true}]:[]}; });
+  await assert.rejects(store.init(async()=>({stats:{rooms:{}},rejected:{words:{}}})), /backup is required/);
+  await assert.rejects(store.init(async()=>({stats:{rooms:{}},rejected:{words:{}}}), async()=>{throw Error("backup disk unavailable");}), /backup disk unavailable/);
+  assert.equal(inserts,0); await store.close();
 });

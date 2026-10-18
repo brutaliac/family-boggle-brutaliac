@@ -4,6 +4,50 @@ A live Boggle game for the whole family. Everyone opens the same link in a
 browser (phone, tablet or computer), no accounts or app installs. Anyone can
 start a round; everyone plays the same board at the same time.
 
+## Single-player Sudoku
+
+Choose **Play Sudoku** at the bottom of the lobby, below **How to play**.
+The **← Boggle** button returns to the same room. Sudoku runs locally and
+does not create a Boggle round or write to the multiplayer leaderboard.
+
+Tap a square, then a number. Use Notes to enter pencil marks, Undo to reverse
+an edit, Erase to clear a square, and Hint to reveal a value. Keyboard controls:
+1–9 enter numbers, arrow keys select squares, N toggles notes, and Backspace
+or Delete erases. Pause hides the board. The timer excludes time in a hidden
+tab or while the phone is locked. Progress and display preferences are saved
+on this device; when browser storage is unavailable, a message explains that
+closing the tab will lose progress. Undo history lasts for the current visit.
+
+Easy, Medium, and Hard use curated, uniquely solvable base puzzles transformed
+by shuffled digits, bands, stacks, rows/columns within them, and transposition.
+These transformations preserve solving logic and uniqueness. Easy is solvable
+with naked singles, Medium also needs hidden singles, and Hard needs techniques
+beyond those two. Each generated puzzle is checked for exactly one solution.
+Difficulty changes apply when **New puzzle** is confirmed. Hints reveal a value;
+they do not teach a solving technique. There is no hint limit.
+
+Deploy `sudoku.html`, `sudoku.css`, `sudoku-engine.js`, and `sudoku.js` beside
+`index.html` in the same directory served by `server.js` (root or `public/`).
+No new dependencies or environment variables are required.
+
+## Scoring and boards
+
+Words score 1 point for 3 letters, 2 for 4, 3 for 5, and one more point for
+each additional letter. Qu is one tile but counts as two letters. In multiplayer,
+words found by just one player earn double points when the round ends; shared
+words still earn base points. Solo rounds use base points. Word-entry feedback
+shows base points; the unique-word bonus is determined at the end.
+
+New rounds use these rules for results, wins, and saved statistics. Existing
+leaderboard history is preserved at its original scores.
+
+Boards roll one face from each of the 16 classic English dice, then shuffle
+their positions. By default, the generator favors boards with at least 50 words,
+a word of at least 7 letters, and at least 3 distinct words of 4+ letters ending
+in "er". Boards below the "er" target have a 30% chance of passing that filter.
+These thresholds can be overridden with the `BOGGLE_MIN_WORDS`, `BOGGLE_MIN_LONG`,
+`BOGGLE_MIN_ER`, and `BOGGLE_ER_SOFT` environment variables.
+
 ## Run it on your own computer (to try it)
 
     npm install
@@ -70,7 +114,10 @@ Rejected-word reports use the same storage choice.
    URL as a **runtime** variable. Keep it out of GitHub, browser code, screenshots and
    build-time/public variables. The existing `npm install` / `npm start` commands still work.
    The example `.env.example` is a reference only; `npm start` does not load `.env` files.
-6. Follow the first-import steps below, then deploy this code. It creates the
+6. Mount a persistent backup directory (for example `/backups`) and set
+   `BOGGLE_BACKUP_DIR=/backups` as a runtime variable. First import refuses to proceed
+   without writing, syncing, reading back, and verifying a complete backup there.
+   Follow the first-import steps below, then deploy this code. It creates the
    `boggle_state` table automatically; the login needs schema/table creation and read/write
    access in this database. There is no separate migration command.
 7. Verify `/healthz`, `/stats.json` (including each `?room=name`), and `/rejected.json`.
@@ -78,7 +125,16 @@ Rejected-word reports use the same storage choice.
 
 **First import from existing files / GitHub Gist:**
 
-- Save a copy of the existing `stats.json` and `rejected.json` files/Gist before switching.
+- **Before merging/deploying this PR**, copy the current app’s entire `DATA_DIR` to the
+  VM (outside the app container), and download both raw files from the existing Gist.
+  The public `/stats.json` endpoint is a leaderboard view, not a full backup: it omits
+  aliases, merge history and internal timestamps. Verify the saved JSON parses, record
+  its checksums, and keep a copy outside the VM. Do not rely only on the mutable Gist.
+- If you need to deploy this code to use its new backup download first, leave
+  `DATABASE_URL` unset, open `/admin`, and choose **Download full data backup**.
+  This exports every room, player, alias, merge archive, and rejected-word record.
+  Verify it with `node scripts/verify-backup.js /path/to/backup.json`. A deployment
+  can replace container-local data, so take the VM/Gist copy above before any redeploy.
 - Stop the old app (including any Render instance) before starting the PostgreSQL version.
   Keep one app instance/replica; live rooms, chat, current streaks and unfinished games still
   live in memory. Use a stop-then-start deployment rather than overlapping app instances.
@@ -86,6 +142,10 @@ Rejected-word reports use the same storage choice.
   existing Gist history can be imported even when Docker has no old local files. If history
   exists only on disk, make those files available under the app's `DATA_DIR` for first start.
   Check the expected room/player records in the existing source before proceeding.
+- Before inserting into an empty PostgreSQL database, the selected source data is
+  saved as a checksum-protected `pre-postgres-*.json` in `BOGGLE_BACKUP_DIR`. The
+  snapshot is verified from disk; any backup failure blocks the import. This must
+  be a mounted persistent directory. Copy that snapshot off the server as well.
 - An empty PostgreSQL database imports the newer local/Gist stats and rejected-word
   documents independently, preserving all rooms, player names, counters and timestamps.
   A failed Gist request or malformed/incomplete legacy document blocks the first import;
@@ -157,3 +217,82 @@ database authority and exclusion of concurrent writers.
 - If a phone loses Wi-Fi, it reconnects by itself and keeps the words it found.
 - Word checking uses a list of about 50,000 everyday English words built into the page
   (obscure Scrabble-only words and names are left out). It lives in `public/index.html`.
+
+## Room voice chat
+
+The compact voice bar is available in the lobby, during rounds, and on results.
+Enter a name, choose **Join Voice**, and allow microphone access. The microphone
+icon is green while on and red while muted; click it to toggle outgoing audio
+while you keep listening. A speech activity pulse uses local microphone levels
+without recording. The exit icon stops the microphone and closes calls.
+Click the avatar stack to see everyone and their connection and microphone status.
+Avatars wrap after five participants. Joining is always manual, including after a lost
+connection. Game sound settings do not mute voice. If the browser blocks incoming
+sound, tap **Enable voice audio**. Headphones help prevent echo.
+
+Voice is audio-only WebRTC, with up to eight participants per room. The app server
+relays connection messages through the existing WebSocket; audio travels between
+participants directly or through your configured TURN relay. The app does not
+record audio. Production microphone access requires HTTPS (localhost works for
+local testing). Room links grant access to both the game and its voice channel.
+
+### Relay configuration for Coolify
+
+STUN discovery works by default, but **configure TURN before relying on voice
+across different households, cellular connections, or restrictive Wi-Fi**. TURN
+provides an alternate route when browsers cannot connect directly.
+
+Use either of these configurations in the Boggle application's Coolify environment:
+
+- For a coturn-compatible relay using shared-secret authentication, set
+  `VOICE_TURN_URLS` to comma-separated URLs such as
+  `turn:relay.example.com:3478,turns:relay.example.com:5349`, and
+  `VOICE_TURN_SECRET` to the same shared secret configured on that relay. The
+  application issues credentials valid for 24 hours; the shared secret is never
+  sent to browsers. Rejoin voice to obtain fresh credentials for a longer session.
+- For a relay provider that supplies ICE configuration, set `VOICE_ICE_SERVERS`
+  to its JSON array of `RTCIceServer` objects, for example
+  `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turns:relay.example.com:5349","username":"<relay-user>","credential":"<relay-password>"}]`.
+  These client credentials are delivered to voice participants; use credentials
+  intended for browser clients. This variable replaces the default STUN list.
+
+Save the environment and redeploy. A TURN relay is a separate service and must
+be reachable directly on its configured transport and media ports; the existing
+Cloudflare HTTP tunnel for the game does not supply a TURN relay. There is no
+need to change the game's HTTP port or WebSocket route.
+
+Try two devices on different networks before inviting everyone. If a participant
+shows a failed connection, check relay configuration, then leave and rejoin voice.
+Mobile browsers may interrupt calls when backgrounded or the phone locks; keep
+the game open during play.
+
+### Checks
+
+Run `npm test` for room isolation, session validation, mute/leave/disconnect,
+replacement tabs, capacity, TURN credentials, and asset delivery checks.
+
+
+### Merge duplicate player stats
+
+Set `BOGGLE_ADMIN_PASSWORD` to a long, unique password in the server environment (Coolify: Environment Variables), redeploy, then visit `/admin` on the game’s HTTPS address. Admin access is disabled until the variable is set. The password stays in page memory only; locking or reloading clears it.
+
+Select a room, the duplicate name, and the profile to retain. Review the preview and confirm. Games, wins, points, and words are added; best round, longest word, most words, and best streak retain the better record. Existing totals cannot reveal overlapping rounds, so review before merging. Merges are blocked during active rounds and when the preview is stale.
+
+The old name redirects future scores to the retained stats record. This does not combine browser sessions or introduce login profiles. Original records and previous aliases are archived in `rooms[room].mergeHistory` in the saved stats document (PostgreSQL when enabled, otherwise `stats.json`), including the existing Gist backup. Download a full backup before editing data. Recovery is manual: stop the app and restore to the authoritative store; editing `stats.json` does not change PostgreSQL. Do not restore blindly after additional games.
+
+
+### Verify and restore a full backup
+
+The admin download and pre-import snapshot use the same checksum-protected format.
+`node scripts/verify-backup.js /path/to/backup.json` verifies integrity and prints counts.
+To restore into a **separate test database**, stop any app pointed at it, verify the
+backup, then decode the payload into `stats.json` and `rejected.json` in a temporary
+`DATA_DIR`. Start the app with that directory, the empty test database’s `DATABASE_URL`,
+and a persistent `BOGGLE_BACKUP_DIR`. First import will back up and import those files.
+Leave `GITHUB_TOKEN` unset during this restore so a Gist cannot supersede them. Check
+all rooms and records before selecting a restored database for production.
+Never remove `DATABASE_URL` as a rollback after PostgreSQL has accepted new games.
+
+The test suite exercises a full export/restore drill, merge history and alias retention,
+restarted browser scoring under an old name, missing backup directories, migration,
+writer exclusion, and database failures. PostgreSQL tests require a disposable database.

@@ -125,7 +125,7 @@ test("PostgreSQL migration, round persistence, restart, and writer isolation", {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "boggle-pg-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await seedFiles(dir);
-  const env = { DATABASE_URL: connectionString, DATA_DIR: dir, BOGGLE_COUNTDOWN_MS: "20", BOGGLE_FORCE_SECONDS: "3", BOGGLE_MIN_WORDS: "1", BOGGLE_MIN_LONG: "0", BOGGLE_MIN_ER: "0" };
+  const env = { DATABASE_URL: connectionString, DATA_DIR: dir, BOGGLE_BACKUP_DIR: path.join(dir,"backups"), BOGGLE_COUNTDOWN_MS: "20", BOGGLE_FORCE_SECONDS: "3", BOGGLE_MIN_WORDS: "1", BOGGLE_MIN_LONG: "0", BOGGLE_MIN_ER: "0" };
   const app = await launch(t, env);
   assert.equal((await (await fetch(app.url + "/stats.json")).json()).players[0].points, 12);
   assert.equal((await (await fetch(app.url + "/stats.json?room=cousins")).json()).players[0].name, "Bob");
@@ -186,4 +186,49 @@ test("PostgreSQL migration, round persistence, restart, and writer isolation", {
   assert.equal((await (await fetch(imported.url + "/stats.json")).json()).players[0].points, 99999999999999);
   assert.equal((await (await fetch(imported.url + "/rejected.json")).json()).words[0].count, 8);
   assert.equal((await imported.stop())[0], 0);
+});
+
+test("PostgreSQL admin merge survives restart, exports full backup and redirects future scores", {
+  skip: !process.env.TEST_DATABASE_URL, timeout: 60000,
+}, async t => {
+  const {decodeBackup}=require('../state-backup');
+  const db=new Client({connectionString:process.env.TEST_DATABASE_URL});await db.connect();t.after(()=>db.end());
+  await db.query('DROP TABLE IF EXISTS boggle_state');
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'boggle-admin-pg-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  await seedFiles(dir);
+  const initial=stats(12);initial.rooms.family.players.ally={...initial.rooms.family.players.alice,name:'Ally',points:8};
+  await fs.writeFile(path.join(dir,'stats.json'),JSON.stringify(initial));
+  const base={DATABASE_URL:process.env.TEST_DATABASE_URL,DATA_DIR:dir,BOGGLE_ADMIN_PASSWORD:'test-admin-password',BOGGLE_COUNTDOWN_MS:'20',BOGGLE_FORCE_SECONDS:'2',BOGGLE_MIN_WORDS:'1',BOGGLE_MIN_LONG:'0',BOGGLE_MIN_ER:'0'};
+  const noBackup=await launch(t,base,true);assert.equal((await noBackup.exited)[0],1);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM boggle_state')).rows[0].n,0);
+  const env={...base,BOGGLE_BACKUP_DIR:path.join(dir,'backups')};
+  const app=await launch(t,env);
+  const snapshotFiles=await fs.readdir(env.BOGGLE_BACKUP_DIR);assert.equal(snapshotFiles.length,1);
+  const snapshot=decodeBackup(await fs.readFile(path.join(env.BOGGLE_BACKUP_DIR,snapshotFiles[0]),'utf8'));
+  assert.deepEqual(snapshot.stats,initial);assert.deepEqual(snapshot.rejected,rejected);
+  const api=(url,route,body)=>fetch(url+'/api/admin/'+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer test-admin-password','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+  const merge={room:'family',source:'ally',target:'alice',updatedAt:12};
+  assert.equal((await api(app.url,'merge',merge)).status,200);
+  const persisted=(await db.query('SELECT stats FROM boggle_state')).rows[0].stats.rooms.family;
+  assert.equal(persisted.players.alice.points,20);assert.equal(persisted.players.ally,undefined);assert.equal(persisted.aliases.ally,'alice');assert.equal(persisted.mergeHistory[0].source.name,'Ally');
+  const backup=await api(app.url,'backup');assert.equal(backup.status,200);assert.match(backup.headers.get('content-disposition'),/attachment/);
+  const exported=decodeBackup(await backup.text());assert.deepEqual(exported.stats.rooms.family,persisted);assert.deepEqual(exported.rejected,rejected);
+  assert.equal((await app.stop())[0],0);
+  const restarted=await launch(t,env);
+  const ws=new WebSocket(restarted.ws);t.after(()=>ws.terminate());const states=[];
+  ws.on('message',data=>{const m=JSON.parse(data);if(m.t==='state')states.push(m);});await once(ws,'open');
+  ws.send(JSON.stringify({t:'hello',key:'ally-browser',name:'Ally'}));await until(()=>states.length);
+  ws.send(JSON.stringify({t:'start',duration:1}));const state=await until(()=>states.find(m=>m.game));
+  await until(()=>Date.now()>=state.game.startAt);
+  const {valid}=await wordFixtures(state.game.board);ws.send(JSON.stringify({t:'words',words:[valid]}));
+  await until(()=>states.some(m=>m.game&&m.game.results));
+  assert.equal((await restarted.stop())[0],0);
+  const after=(await db.query('SELECT stats FROM boggle_state')).rows[0].stats.rooms.family;
+  assert.equal(after.players.alice.games,5);assert.equal(after.players.alice.name,'Alice');assert.equal(after.players.ally,undefined);assert.equal(after.mergeHistory.length,1);
+  // Restore drill: import the exported full backup into a fresh disposable DB.
+  await db.query('DROP TABLE boggle_state');
+  await fs.writeFile(path.join(dir,'stats.json'),JSON.stringify(exported.stats));await fs.writeFile(path.join(dir,'rejected.json'),JSON.stringify(exported.rejected));
+  const restored=await launch(t,env);
+  const restoredState=(await db.query('SELECT stats,rejected FROM boggle_state')).rows[0];assert.deepEqual(restoredState,exported);
+  assert.equal((await restored.stop())[0],0);
 });

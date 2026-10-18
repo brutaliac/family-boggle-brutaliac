@@ -26,7 +26,7 @@ class PostgresStore {
     this.onFailure(error);
   }
 
-  async init(legacyState) {
+  async init(legacyState, beforeImport) {
     await this.client.connect();
     // The game itself is single-process. Also prevent overlapping deployments
     // from overwriting one another's in-memory aggregate leaderboard.
@@ -45,6 +45,8 @@ class PostgresStore {
     // Only consult legacy storage for an empty database. A newer Gist or stale
     // local file must never replace an established PostgreSQL database.
     const state = await legacyState();
+    if (typeof beforeImport !== "function") throw new Error("A verified backup is required before first import");
+    await beforeImport(state);
     await this.client.query(
       "INSERT INTO boggle_state (id, stats, rejected) VALUES (1, $1::jsonb, $2::jsonb)",
       [JSON.stringify(state.stats), JSON.stringify(state.rejected)],
